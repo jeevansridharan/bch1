@@ -1,0 +1,162 @@
+@import "tailwindcss";
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: #0a0b14;
+    color: #e2e8f0;
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .glow-green {
+    box-shadow: 0 0 20px rgba(74, 222, 128, 0.25), 0 0 40px rgba(74, 222, 128, 0.1);
+  }
+
+  .glow-purple {
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.3), 0 0 40px rgba(168, 85, 247, 0.1);
+  }
+
+  .glow-blue {
+    box-shadow: 0 0 16px rgba(96, 165, 250, 0.2);
+  }
+
+  .card-glass {
+    background: rgba(15, 17, 35, 0.85);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .gradient-btn {
+    background: linear-gradient(135deg, #7c3aed, #4f46e5);
+    transition: all 0.25s ease;
+  }
+
+  .gradient-btn:hover {
+    background: linear-gradient(135deg, #8b5cf6, #6366f1);
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.45);
+    transform: translateY(-1px);
+  }
+
+  .gradient-btn:active {
+    transform: translateY(0px);
+  }
+
+  .gradient-btn-green {
+    background: linear-gradient(135deg, #059669, #10b981);
+    transition: all 0.25s ease;
+  }
+
+  .gradient-btn-green:hover {
+    background: linear-gradient(135deg, #10b981, #34d399);
+    box-shadow: 0 0 18px rgba(16, 185, 129, 0.4);
+    transform: translateY(-1px);
+  }
+
+  .gradient-btn-red {
+    background: linear-gradient(135deg, #be123c, #e11d48);
+    transition: all 0.25s ease;
+  }
+
+  .gradient-btn-red:hover {
+    background: linear-gradient(135deg, #e11d48, #f43f5e);
+    box-shadow: 0 0 18px rgba(225, 29, 72, 0.4);
+    transform: translateY(-1px);
+  }
+
+  .input-web3 {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #e2e8f0;
+    border-radius: 10px;
+    padding: 10px 14px;
+    width: 100%;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    font-size: 0.95rem;
+  }
+
+  .input-web3:focus {
+    border-color: rgba(139, 92, 246, 0.6);
+    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.12);
+  }
+
+  .input-web3::placeholder {
+    color: rgba(148, 163, 184, 0.45);
+  }
+
+  .progress-track {
+    background: rgba(255, 255, 255, 0.06);
+    border-radius: 999px;
+    height: 10px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #7c3aed, #06b6d4, #10b981);
+    background-size: 200% 100%;
+    animation: shimmer 2.5s linear infinite;
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% center; }
+    100% { background-position: -200% center; }
+  }
+
+  .badge-pending {
+    background: rgba(251, 191, 36, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  .badge-approved {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
+    border: 1px solid rgba(16, 185, 129, 0.35);
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+
+  .milestone-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 12px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .milestone-card:hover {
+    border-color: rgba(139, 92, 246, 0.3);
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.1);
+  }
+
+  .milestone-approved {
+    border-color: rgba(16, 185, 129, 0.35) !important;
+    box-shadow: 0 0 14px rgba(16, 185, 129, 0.12);
+  }
+
+  .section-divider {
+    border: none;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    margin: 2rem 0;
+  }
+
+  .nav-glow {
+    box-shadow: 0 2px 30px rgba(0, 0, 0, 0.5);
+  }
+}
