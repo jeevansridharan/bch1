@@ -25,31 +25,37 @@ import { createClient } from '@supabase/supabase-js'
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-// Fail loudly in development if env vars are missing
-if (!supabaseUrl || !supabaseKey) {
-    throw new Error(
-        '[Milestara] Missing Supabase env vars.\n' +
+// Warn in development if env vars are missing — but don't crash the app.
+// Pages that need Supabase will show their own "not configured" UI.
+export const supabaseConfigured = Boolean(supabaseUrl && supabaseKey)
+
+if (!supabaseConfigured) {
+    console.warn(
+        '[Milestara] Supabase env vars not set.\n' +
         'Create a .env file with VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.\n' +
-        'See .env.example for reference.'
+        'See .env.example for reference.\n' +
+        'The app will run in offline/demo mode until configured.'
     )
 }
 
-export const supabase = createClient(supabaseUrl, supabaseKey, {
-    auth: {
-        // Persist sessions in localStorage between page refreshes
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true,
-    },
-    db: {
-        // Default schema — change only if you use a custom Postgres schema
-        schema: 'public',
-    },
-    global: {
-        headers: {
-            'x-app-name': 'milestara',
+export const supabase = supabaseConfigured
+    ? createClient(supabaseUrl, supabaseKey, {
+        auth: {
+            // Persist sessions in localStorage between page refreshes
+            persistSession: true,
+            autoRefreshToken: true,
+            detectSessionInUrl: true,
         },
-    },
-})
+        db: {
+            // Default schema — change only if you use a custom Postgres schema
+            schema: 'public',
+        },
+        global: {
+            headers: {
+                'x-app-name': 'milestara',
+            },
+        },
+    })
+    : null
 
 export default supabase

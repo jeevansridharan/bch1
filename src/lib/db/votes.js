@@ -22,6 +22,10 @@
 import { supabase } from '../supabase'
 import { updateMilestoneStatus } from './milestones'
 
+function requireSupabase() {
+    if (!supabase) throw new Error('Supabase is not configured. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your .env file.')
+}
+
 // Threshold for governance approval (>50%)
 const APPROVAL_THRESHOLD = 0.5
 

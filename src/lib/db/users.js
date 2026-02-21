@@ -19,6 +19,10 @@
 
 import { supabase } from '../supabase'
 
+function requireSupabase() {
+    if (!supabase) throw new Error('Supabase is not configured. Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your .env file.')
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -34,6 +38,7 @@ import { supabase } from '../supabase'
  */
 export async function upsertUser(walletAddress) {
     if (!walletAddress) throw new Error('walletAddress is required')
+    requireSupabase()
 
     const { data, error } = await supabase
         .from('users')
@@ -68,6 +73,7 @@ export async function upsertUser(walletAddress) {
  */
 export async function getUserByWallet(walletAddress) {
     if (!walletAddress) throw new Error('walletAddress is required')
+    requireSupabase()
 
     const { data, error } = await supabase
         .from('users')

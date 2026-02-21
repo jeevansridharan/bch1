@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react'
 import { ArrowUpRight, ArrowDownLeft, RotateCcw, ExternalLink, Clock } from 'lucide-react'
-import { supabase } from '../lib/supabase'
+import { supabase, supabaseConfigured } from '../lib/supabase'
 
 // ── Badge per type ────────────────────────────────────────────────────────────
 const TYPE_META = {
@@ -78,6 +78,11 @@ export default function TransactionsPage() {
     const [error, setError] = useState(null)
 
     useEffect(() => {
+        if (!supabaseConfigured) {
+            setError('Supabase not configured — add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your .env file.')
+            setLoading(false)
+            return
+        }
         async function load() {
             setLoading(true)
             try {
