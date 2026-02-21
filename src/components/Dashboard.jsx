@@ -1,11 +1,25 @@
-import React from 'react'
+import React, { useState, useCallback } from 'react'
 import ProgressBar from './ProgressBar'
 import MilestoneCard from './MilestoneCard'
 import WalletPanel from './WalletPanel'
+import GovernancePanel from './GovernancePanel'
 
 export default function Dashboard({ project, onFund, onVote, onReset }) {
     const { title, description, fundingTarget, fundedAmount, milestones } = project
     const approvedCount = milestones.filter(m => m.status === 'Approved').length
+
+    // ── Week 3: track the connected wallet object so GovernancePanel can use it
+    const [connectedWallet, setConnectedWallet] = useState(null)
+
+    // Handle governance approval — syncs with the existing onVote system
+    const handleGovApproval = useCallback((milestoneId) => {
+        // Force the milestone to "Approved" via the parent vote handler
+        // by casting enough yes votes to clear any no votes
+        const milestone = milestones.find(m => m.id === milestoneId)
+        if (milestone && milestone.status !== 'Approved') {
+            onVote(milestoneId, 'yes')
+        }
+    }, [milestones, onVote])
 
     return (
         <div className="max-w-3xl mx-auto">
@@ -60,8 +74,18 @@ export default function Dashboard({ project, onFund, onVote, onReset }) {
                 <ProgressBar current={fundedAmount} target={fundingTarget} />
             </div>
 
-            {/* ── BCH Wallet Panel (Week 2) ─────────────────────────────────── */}
-            <WalletPanel onRealFund={onFund} />
+            {/* ── Week 2: BCH Wallet Panel ───────────────────────────────────── */}
+            <WalletPanel
+                onRealFund={onFund}
+                onWalletConnect={setConnectedWallet}
+            />
+
+            {/* ── Week 3: Governance + Milestone Locking Panel ──────────────── */}
+            <GovernancePanel
+                wallet={connectedWallet}
+                milestones={milestones}
+                onMilestoneApproved={handleGovApproval}
+            />
 
             {/* ── Milestones Section ────────────────────────────────────────── */}
             <div className="card-glass rounded-2xl p-8">

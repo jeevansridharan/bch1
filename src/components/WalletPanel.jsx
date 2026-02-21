@@ -30,7 +30,7 @@ function Spinner() {
     )
 }
 
-export default function WalletPanel({ onRealFund }) {
+export default function WalletPanel({ onRealFund, onWalletConnect }) {
     // ── State ────────────────────────────────────────────────────────────────
     const [wallet, setWallet] = useState(null)   // mainnet-js wallet object
     const [address, setAddress] = useState('')
@@ -67,6 +67,8 @@ export default function WalletPanel({ onRealFund }) {
             setWallet(w)
             setAddress(w.cashaddr)
             await refreshBalance(w)
+            // Week 3: expose wallet to parent so GovernancePanel can use it
+            if (onWalletConnect) onWalletConnect(w)
         } catch (e) {
             console.error(e)
             setError('Failed to create wallet: ' + e.message)
@@ -85,6 +87,8 @@ export default function WalletPanel({ onRealFund }) {
         setTxId('')
         setTxStatus('idle')
         clearError()
+        // Week 3: notify parent wallet is gone
+        if (onWalletConnect) onWalletConnect(null)
     }
 
     // ── Fund project ──────────────────────────────────────────────────────────

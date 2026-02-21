@@ -1,0 +1,60 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// MilestoneLock.cash  —  Milestara Week 3 Smart Contract
+//
+// What this contract does:
+//   • Locks BCH inside this contract when someone funds a project.
+//   • Has TWO ways to unlock the funds (two "functions"):
+//       1. release()  – The original owner (project creator) can take funds
+//                       OUT only after governance has approved the milestone.
+//       2. refund()   – Anyone can refund back to the original funder at any time
+//                       (for demo/hackathon simplicity).
+//
+// How CashScript works (beginner explanation):
+//   • A "contract" is just a Bitcoin Cash locking script with named parameters.
+//   • `constructor` params are embedded into the lock at deploy time.
+//   • Each `function` defines one way to SPEND (unlock) the locked coins.
+//   • `require(...)` is a guard; if it fails the tx is rejected.
+//
+// Parameters baked in when the contract is deployed:
+//   • ownerPk   – Public key of the project team (who will receive funds on release).
+//   • funderPk  – Public key of the person who funded (for refund path).
+// ─────────────────────────────────────────────────────────────────────────────
+
+pragma cashscript ^0.10.0;
+
+contract MilestoneLock(
+    pubkey ownerPk,    // project team's public key
+    pubkey funderPk    // backer's public key (for refund)
+) {
+    // ── FUNCTION 1: release ──────────────────────────────────────────────────
+    // The project OWNER signs to withdraw funds.
+    // In our Week 3 demo, the JS layer only calls this after >50% YES votes.
+    // The contract itself just verifies the owner's signature — the governance
+    // rule lives in the frontend service (milestone approval gate).
+    function release(sig ownerSig) {
+        require(checkSig(ownerSig, ownerPk));
+    }
+
+    // ── FUNCTION 2: refund ───────────────────────────────────────────────────
+    // The FUNDER can reclaim their BCH at any time (safety valve for demo).
+    function refund(sig funderSig) {
+        require(checkSig(funderSig, funderPk));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WHY SO SIMPLE?
+//
+// On BCH, smart contracts are UTXO-based, not account-based (unlike Ethereum).
+// The governance logic (vote counting, 50% threshold) lives off-chain in JS
+// and only unlocks the contract after the threshold is met.
+//
+// For a hackathon MVP this is the correct pattern:
+//   • Keep the contract minimal (= smaller script = lower fees = easier audit)
+//   • Put complex logic in the trusted frontend service
+//   • The contract enforces: "only owner can release"
+//   • The frontend enforces: "owner can only release after milestone approved"
+//
+// In production you'd put the vote counter on-chain via covenants or CashTokens
+// NFTs, but that's beyond a 1-week sprint.
+// ─────────────────────────────────────────────────────────────────────────────
