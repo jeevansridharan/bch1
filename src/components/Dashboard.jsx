@@ -8,10 +8,12 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { fetchProjectById } from '../lib/db/projects'
-import ProgressBar from './ProgressBar'
-import MilestoneCard from './MilestoneCard'
+import { Trash2, Shield, LayoutDashboard, History, CheckCircle2, Circle } from 'lucide-react'
+import { useWallet } from '../contexts/WalletContext'
 import WalletPanel from './WalletPanel'
 import GovernancePanel from './GovernancePanel'
+import ProgressBar from './ProgressBar'
+import MilestoneCard from './MilestoneCard'
 import { scanVotes } from '../services/govService'
 import { castVote } from '../services/milestoneContract'
 
@@ -33,7 +35,7 @@ export default function Dashboard({ project: initialProject, onFund, onVote, onT
     const [project, setProject] = useState(initialProject)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
-    const [connectedWallet, setConnectedWallet] = useState(null)
+    const { wallet: connectedWallet } = useWallet()
     const [onChainTally, setOnChainTally] = useState({ yesVotes: 0, noVotes: 0, approvalPercentage: 0 })
 
     // ── Fetch Logic ──────────────────────────────────────────────────────────
@@ -136,16 +138,20 @@ export default function Dashboard({ project: initialProject, onFund, onVote, onT
         m => m.approved === true || m.status === 'Approved' || m.status === 'approved'
     ).length
 
-    // Strips the [On-Chain Address: ...] tag from the description for display.
+    // Strips the [On-Chain Address: ...] and other metadata tags from the description for display.
     const cleanDescription = (text) => {
         if (!text) return ''
-        return text.replace(/\[On-Chain Address: bchtest:[^\]]+\]/g, '').trim()
+        return text
+            .replace(/\[On-Chain Address: [^\]]+\]/g, '')
+            .replace(/\[Milestone ID: [^\]]+\]/g, '')
+            .replace(/\[Deadline: [^\]]+\]/g, '')
+            .trim()
     }
 
-    // Fallback: If contract_address is null, try to extract it from the description
-    const contract_address = project?.contract_address || (project?.description?.includes('[On-Chain Address: ')
-        ? project.description.match(/\[On-Chain Address: (bchtest:[^\]]+)\]/)?.[1]
-        : null)
+    // Extraction helpers for on-chain contract data stored in description
+    const contract_address = project?.contract_address || (project?.description?.match(/\[On-Chain Address: (bchtest:[^\]]+)\]/)?.[1] || null)
+    const milestone_id_hex = project?.description?.match(/\[Milestone ID: ([^\]]+)\]/)?.[1] || null
+    const deadline_val = project?.description?.match(/\[Deadline: ([^\]]+)\]/)?.[1] || null
 
     // ── Render Logic ──────────────────────────────────────────────────────────
 
@@ -226,13 +232,15 @@ export default function Dashboard({ project: initialProject, onFund, onVote, onT
             {/* ── Wallet Panel ───────────────────────────────────── */}
             <WalletPanel
                 onRealFund={handleFundComplete}
-                onWalletConnect={setConnectedWallet}
             />
 
             {/* ── Governance + Milestone Locking Panel ──────────────── */}
             <GovernancePanel
                 wallet={connectedWallet}
                 projectId={initialProject.id}
+                contractAddress={contract_address}
+                milestoneIdHex={milestone_id_hex}
+                deadline={deadline_val}
                 milestones={milestones}
                 onMilestoneApproved={handleGovApproval}
                 onTransaction={async (amt, hash, type) => {

@@ -58,7 +58,7 @@ const PLACEHOLDER_WALLET = 'bchtest:qp0000000000000000000000000000000000000000'
  * Platform Oracle Public Key (Tally Engine) 
  * In production, this would be a fixed key held by the platform backend.
  */
-const PLATFORM_ORACLE_PK_HEX = '02' + '2'.repeat(64); // Simulation/Test key
+const PLATFORM_ORACLE_PK_HEX = '02989c0b76cb563971fdc9bef31ec06c3560f3249d6ee9e5d83c57625596e05f6f'; // Real Platform Oracle Mock PubKey
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -157,7 +157,7 @@ export default function ProjectsPage() {
         // ── 2. Prepare Public Keys for Contract ──────────────────────────────
         // Use real keys if wallet is connected, otherwise dummy but valid hex
         const dummyPk = libauth.hexToBin('02' + '0'.repeat(64));
-        const creatorPk = wallet?.publicKey ? wallet.publicKey : dummyPk;
+        const creatorPk = wallet?.publicKey ? libauth.hexToBin(wallet.publicKey) : dummyPk;
         const funderPk = creatorPk; // Creator is default funder
         const oraclePk = libauth.hexToBin(PLATFORM_ORACLE_PK_HEX);
 
@@ -194,9 +194,10 @@ export default function ProjectsPage() {
         console.log('[ProjectsPage] Voting addresses will be derived from project UUID after insert.');
 
         // ── 6. Build description with on-chain metadata (fallback storage) ────
-        // This safely embeds the contract address even if the DB column is missing.
+        // This safely embeds the contract address and params even if the DB column is missing.
+        const milestoneIdHex = libauth.binToHex(milestoneId);
         const metaTags = contractAddress
-            ? `\n\n[On-Chain Address: ${contractAddress}]`
+            ? `\n\n[On-Chain Address: ${contractAddress}]\n[Milestone ID: ${milestoneIdHex}]\n[Deadline: ${deadline}]`
             : '';
         const fullDescription = (projectData.description ?? '') + metaTags;
 

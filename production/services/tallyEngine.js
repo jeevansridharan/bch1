@@ -114,19 +114,28 @@ export async function tallyVotes(projectId, tokenCategoryId) {
  */
 export async function generateApprovalSignature(milestoneId, oracleWif) {
     // 1. Build the proof message: milestoneId_bytes || 0x01
-    const messageHex = milestoneId.replace('0x', '') + '01';
+    // CashScript checkDataSig verifies: sig covers sha256(message)
+    let idHex = milestoneId.replace('0x', '');
+    if (idHex.length < 64) idHex = idHex.padEnd(64, '0'); // Pad to bytes32
+
+    const messageHex = idHex + '01';
     const messageBytes = libauth.hexToBin(messageHex);
 
+    // sha256 hash the message — checkDataSig in CashScript uses sha256(msg) as the sighash
     const sha256 = await libauth.instantiateSha256();
     const messageHash = sha256.hash(messageBytes);
 
-    // 2. Decode oracle WIF → private key bytes
-    const wifResult = libauth.decodeWif(oracleWif);
-    if (typeof wifResult === 'string') throw new Error(`WIF decode failed: ${wifResult}`);
+    // 2. Decode oracle WIF → private key bytes (libauth 3.x API)
+    const wifResult = libauth.decodePrivateKeyWif(oracleWif);
+    if (typeof wifResult === 'string') {
+        throw new Error(`Oracle WIF decode failed: ${wifResult}`);
+    }
     const privateKey = wifResult.privateKey;
 
-    // 3. Sign with secp256k1 (Schnorr/ECDSA datasig format)
-    const signature = libauth.signDataSigHash(privateKey, messageHash);
+    // 3. Sign with Schnorr (BCH datasig format used by checkDataSig opcode)
+    // In libauth 3.x, signDataSigHash was removed; use secp256k1 directly.
+    const secp256k1 = await libauth.instantiateSecp256k1();
+    const signature = secp256k1.signMessageHashSchnorr(privateKey, messageHash);
 
     return {
         proofHex: messageHex,

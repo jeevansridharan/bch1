@@ -54,7 +54,16 @@ function VoteBar({ votes }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
-export default function GovernancePanel({ wallet, projectId, milestones = [], onMilestoneApproved, onTransaction }) {
+export default function GovernancePanel({
+    wallet,
+    projectId,
+    contractAddress,
+    milestoneIdHex,
+    deadline,
+    milestones = [],
+    onMilestoneApproved,
+    onTransaction
+}) {
     // ── State ─────────────────────────────────────────────────────────────────
     const [tokenBal, setTokenBal] = useState(0)
     const [lockedBch, setLockedBch] = useState(0)
@@ -149,7 +158,14 @@ export default function GovernancePanel({ wallet, projectId, milestones = [], on
         setError('')
         setReleaseId(milestoneId)
         try {
-            const txId = await releaseMilestoneFunds(wallet, amountBch, PROJECT_ADDRESS)
+            // PASS THE CONTRACT DATA FOR ORACLE VALIDATION
+            const txId = await releaseMilestoneFunds(
+                wallet,
+                amountBch,
+                contractAddress,
+                milestoneIdHex,
+                deadline
+            )
             setReleaseTxId(prev => ({ ...prev, [milestoneId]: txId }))
             if (onTransaction) {
                 onTransaction(amountBch, txId, 'release')
@@ -320,14 +336,32 @@ export default function GovernancePanel({ wallet, projectId, milestones = [], on
                                     )}
 
                                     {approved && !txId && (
-                                        <button
-                                            onClick={() => handleRelease(m.id, 0.001)}
-                                            disabled={releaseId === m.id}
-                                            className="w-full py-2.5 rounded-xl font-bold text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60"
-                                            style={{ background: 'linear-gradient(135deg, #10b981, #059669)' }}
-                                        >
-                                            {releaseId === m.id ? <><Spinner /> Releasing…</> : '🚀 Release 0.001 BCH'}
-                                        </button>
+                                        <>
+                                            <button
+                                                onClick={() => handleRelease(m.id, m.amountAllocated || 0.01)}
+                                                disabled={releaseId === m.id || !contractAddress}
+                                                className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all"
+                                                style={{
+                                                    background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                                                    color: 'white',
+                                                    boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
+                                                    opacity: releaseId === m.id || !contractAddress ? 0.5 : 1
+                                                }}
+                                            >
+                                                {releaseId === m.id ? <Spinner /> : '🚀 Release Funds to Creator'}
+                                            </button>
+
+                                            {(!contractAddress || !milestoneIdHex) && (
+                                                <p className="text-[10px] text-amber-500/80 mt-2 text-center italic">
+                                                    ⚠️ On-chain metadata sync required for oracle release
+                                                </p>
+                                            )}
+                                            {contractAddress && milestoneIdHex && (
+                                                <p className="text-[10px] text-emerald-500/80 mt-2 text-center italic">
+                                                    ✓ On-chain Protected · Oracle Sync Ready
+                                                </p>
+                                            )}
+                                        </>
                                     )}
 
                                     {txId && (

@@ -125,7 +125,7 @@ export async function getBalance(wallet) {
         return bchBalance
     } catch (err) {
         console.error('[bchWallet] Failed to fetch balance:', err.message)
-        return 0
+        return null // Return null so UI knows it's an error/unknown, not zero
     }
 }
 

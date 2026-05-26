@@ -13,22 +13,26 @@ import GovernancePage from './pages/GovernancePage'
 import TransactionsPage from './pages/TransactionsPage'
 import ProfilePage from './pages/ProfilePage'
 
+import { WalletProvider } from './contexts/WalletContext'
+
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        {/* All pages share the sidebar Layout */}
-        <Route element={<Layout />}>
-          <Route index element={<DashboardPage />} />
-          <Route path="projects" element={<ProjectsPage />} />
-          <Route path="governance" element={<GovernancePage />} />
-          <Route path="transactions" element={<TransactionsPage />} />
-          <Route path="profile" element={<ProfilePage />} />
+      <WalletProvider>
+        <Routes>
+          {/* All pages share the sidebar Layout */}
+          <Route element={<Layout />}>
+            <Route index element={<DashboardPage />} />
+            <Route path="projects" element={<ProjectsPage />} />
+            <Route path="governance" element={<GovernancePage />} />
+            <Route path="transactions" element={<TransactionsPage />} />
+            <Route path="profile" element={<ProfilePage />} />
 
-          {/* Catch-all → redirect to dashboard */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
+            {/* Catch-all → redirect to dashboard */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </WalletProvider>
     </BrowserRouter>
   )
 }

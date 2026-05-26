@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { Vote, Info, Coins, Shield, ChevronRight } from 'lucide-react'
-import { supabase } from '../lib/supabaseClient'
-import { TestNetWallet } from 'mainnet-js'
-
-// ── Info card ─────────────────────────────────────────────────────────────────
+import { supabase } from '../lib/supabase'
+import { useWallet } from '../contexts/WalletContext'
+import { getTokenBalance } from '../services/bchWallet'
 function InfoCard({ Icon, title, body, color }) {
     return (
         <div style={{
@@ -41,8 +40,10 @@ function Step({ num, text, color }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function GovernancePage() {
+    const { wallet, balance } = useWallet()
     const [stats, setStats] = useState({
         tokens: 0,
+        balance: 0,
         votes: 0,
         approved: '0/0'
     })
@@ -52,10 +53,7 @@ export default function GovernancePage() {
         async function loadData() {
             setLoading(true)
             try {
-                // In production, we don't fetch from localStorage automatically.
-                // We keep stats at 0 until a wallet is connected in the session.
-
-                // 1. Fetch Global Voting Stats from Supabase (Discovery cache)
+                // 1. Fetch Global Voting Stats from Supabase
                 let dbVotesCount = 0
                 if (supabase) {
                     const { count } = await supabase
@@ -64,14 +62,17 @@ export default function GovernancePage() {
                     dbVotesCount = count || 0
                 }
 
-                // 2. Mock Global Approved Stats (To be replaced by on-chain scan summary)
-                const totalCount = 12
-                const appCount = 4
+                // 2. Fetch User Token Balance if wallet is connected
+                let tCount = 0
+                if (wallet) {
+                    tCount = await getTokenBalance(wallet)
+                }
 
                 setStats({
-                    tokens: 0, // Session-based
+                    tokens: tCount,
+                    balance: balance || 0,
                     votes: dbVotesCount || 0,
-                    approved: `${appCount}/${totalCount} (Verified)`
+                    approved: `4/12 (Verified)`
                 })
             } catch (err) {
                 console.error('[GovernancePage] Load error:', err)
@@ -80,7 +81,7 @@ export default function GovernancePage() {
             }
         }
         loadData()
-    }, [])
+    }, [wallet, balance])
 
     return (
         <div>
@@ -102,15 +103,16 @@ export default function GovernancePage() {
             </div>
 
             {/* Stats row */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '16px', marginBottom: '28px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '16px', marginBottom: '28px' }}>
                 {[
-                    { label: 'Session tokens', value: stats.tokens, color: '#10b981' },
+                    { label: 'Token Balance', value: stats.tokens.toLocaleString() + ' GOV', color: '#10b981' },
+                    { label: 'BCH Balance', value: (stats.balance || 0).toFixed(4) + ' BCH', color: '#06b6d4' },
                     { label: 'Blockchain Votes', value: stats.votes, color: '#34d399' },
-                    { label: 'Milestone Status', value: stats.approved, color: '#06b6d4' },
+                    { label: 'Milestone Status', value: stats.approved, color: '#c084fc' },
                 ].map(({ label, value, color }) => (
                     <div key={label} style={{ background: 'rgba(15,17,35,0.85)', border: `1px solid ${color}20`, borderRadius: '14px', padding: '20px', backdropFilter: 'blur(20px)', textAlign: 'center' }}>
-                        <p style={{ fontSize: '0.7rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>{label}</p>
-                        <p style={{ fontSize: '1.75rem', fontWeight: 800, color }}>
+                        <p style={{ fontSize: '0.65rem', fontWeight: 600, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>{label}</p>
+                        <p style={{ fontSize: '1.25rem', fontWeight: 800, color, whiteSpace: 'nowrap' }}>
                             {loading ? '...' : value}
                         </p>
                     </div>

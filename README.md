@@ -1,4 +1,4 @@
-# Milestara — Week 3: CashScript + CashTokens Governance
+# Milestara — : CashScript + CashTokens Governance
 
 ## 📦 What Was Added (Week 3)
 

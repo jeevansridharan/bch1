@@ -8,15 +8,12 @@
  *  - Transaction hash display + explorer link
  */
 
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState } from 'react'
+import { useWallet } from '../contexts/WalletContext'
 import {
-    initializeWallet,
-    getBalance,
     fundProject,
-    disconnectWallet,
     getExplorerUrl,
     shortenAddress,
-    PROJECT_ADDRESS,
 } from '../services/bchWallet'
 import { QRCodeCanvas } from 'qrcode.react'
 
@@ -31,15 +28,21 @@ function Spinner() {
 }
 
 export default function WalletPanel({ onRealFund, onWalletConnect }) {
-    // ── State ────────────────────────────────────────────────────────────────
-    const [wallet, setWallet] = useState(null)   // mainnet-js wallet object
-    const [address, setAddress] = useState('')
-    const [balance, setBalance] = useState(null)   // BCH number or null
+    const {
+        wallet,
+        address,
+        balance,
+        loading: contextLoading,
+        error: contextError,
+        connect,
+        disconnect,
+        refreshBalance
+    } = useWallet()
+
+    // ── Local UI State ───────────────────────────────────────────────────────
     const [amount, setAmount] = useState('')     // user-typed BCH amount
     const [txId, setTxId] = useState('')     // successful tx hash
-    const [error, setError] = useState('')
-    const [connectLoading, setConnectLoading] = useState(false)
-    const [balanceLoading, setBalanceLoading] = useState(false)
+    const [uiError, setUiError] = useState('')
     const [sendLoading, setSendLoading] = useState(false)
     const [txStatus, setTxStatus] = useState('idle') // 'idle'|'sending'|'success'|'error'
     const [showQr, setShowQr] = useState(false)
@@ -47,92 +50,38 @@ export default function WalletPanel({ onRealFund, onWalletConnect }) {
     const [copied, setCopied] = useState(false)
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-    const clearError = () => setError('')
-
-    const refreshBalance = useCallback(async (w) => {
-        const targetWallet = w || wallet
-        if (!targetWallet) return
-        setBalanceLoading(true)
-        try {
-            const bal = await getBalance(targetWallet)
-            setBalance(bal)
-            console.log('[WalletPanel] Balance updated:', bal)
-        } catch (e) {
-            console.error('[WalletPanel] Balance refresh failed:', e)
-            setError('Could not fetch balance. Check Chipnet connection.')
-        } finally {
-            setBalanceLoading(false)
-        }
-    }, [wallet])
-
-    // ── Auto-connect on mount ─────────────────────────────────────────────────
-    useEffect(() => {
-        const checkExisting = async () => {
-            const storedWif = localStorage.getItem('milestara_chipnet_wif')
-            if (storedWif && !wallet) {
-                console.log('[WalletPanel] Found stored WIF, auto-connecting...')
-                handleConnect()
-            }
-        }
-        checkExisting()
-    }, []) // only once on mount
-
-    // ── Auto-refresh balance when wallet connects ─────────────────────────────
-    useEffect(() => {
-        if (wallet) {
-            console.log('[WalletPanel] Wallet connected, fetching balance...')
-            refreshBalance(wallet)
-            // Auto-refresh every 10 seconds while wallet is connected
-            const interval = setInterval(() => {
-                refreshBalance(wallet)
-            }, 10000)
-            return () => clearInterval(interval)
-        }
-    }, [wallet, refreshBalance])
-
     // ── Connect wallet ────────────────────────────────────────────────────────
     const handleConnect = async (isImport = false) => {
-        clearError()
-        setConnectLoading(true)
+        setUiError('')
         try {
-            const w = await initializeWallet(isImport ? wifInput : null)
-            setWallet(w)
-            setAddress(w.cashaddr)
-            console.log('[WalletPanel] Wallet connected:', w.cashaddr)
-            // Balance will be fetched by useEffect when wallet state updates
+            const w = await connect(isImport ? wifInput : null)
             if (onWalletConnect) onWalletConnect(w)
         } catch (e) {
-            console.error('[WalletPanel] Connection failed:', e)
-            setError('Failed to initialize wallet: ' + e.message)
-        } finally {
-            setConnectLoading(false)
+            setUiError(e.message || 'Connection failed')
         }
     }
 
     // ── Disconnect wallet ─────────────────────────────────────────────────────
     const handleDisconnect = () => {
-        disconnectWallet()
-        setWallet(null)
-        setAddress('')
-        setBalance(null)
+        disconnect()
         setAmount('')
         setTxId('')
         setTxStatus('idle')
         setWifInput('')
-        clearError()
+        setUiError('')
         if (onWalletConnect) onWalletConnect(null)
     }
 
     // ── Fund project ──────────────────────────────────────────────────────────
     const handleFund = async () => {
-        clearError()
+        setUiError('')
         const parsed = parseFloat(amount)
         if (!parsed || parsed <= 0) {
-            setError('Enter a valid BCH amount greater than 0.')
+            setUiError('Enter a valid BCH amount greater than 0.')
             return
         }
         if (balance !== null && parsed > balance) {
-            setError(`Insufficient balance. You have ${balance.toFixed(8)} BCH.`)
+            setUiError(`Insufficient balance. You have ${balance.toFixed(8)} BCH.`)
             return
         }
 
@@ -144,14 +93,12 @@ export default function WalletPanel({ onRealFund, onWalletConnect }) {
             const hash = await fundProject(wallet, parsed)
             setTxId(hash)
             setTxStatus('success')
-            console.log('[WalletPanel] Transaction successful:', hash)
             if (onRealFund) onRealFund(parsed, hash)
-            // Give blockchain some time to process, then refresh balance
+            // Refresh balance shortly after fund
             setTimeout(() => refreshBalance(), 2000)
         } catch (e) {
-            console.error('[WalletPanel] Funding failed:', e)
             setTxStatus('error')
-            setError(e.message || 'Transaction failed.')
+            setUiError(e.message || 'Transaction failed.')
         } finally {
             setSendLoading(false)
         }
@@ -195,10 +142,10 @@ export default function WalletPanel({ onRealFund, onWalletConnect }) {
                         />
                         <button
                             onClick={() => handleConnect(true)}
-                            disabled={connectLoading || !wifInput}
+                            disabled={contextLoading || !wifInput}
                             className="w-full py-2.5 rounded-lg font-bold text-white gradient-btn-green text-sm disabled:opacity-50"
                         >
-                            {connectLoading ? <Spinner /> : 'Import Wallet'}
+                            {contextLoading ? <Spinner /> : 'Import Wallet'}
                         </button>
                     </div>
 
@@ -210,10 +157,10 @@ export default function WalletPanel({ onRealFund, onWalletConnect }) {
                     <button
                         id="generate-wallet-btn"
                         onClick={() => handleConnect(false)}
-                        disabled={connectLoading}
+                        disabled={contextLoading}
                         className="w-full py-3.5 rounded-xl font-bold text-slate-300 hover:text-white transition-all flex items-center justify-center gap-2 border border-slate-700 hover:border-emerald-500/50 bg-slate-400/5"
                     >
-                        {connectLoading ? <><Spinner /> Generating…</> : 'Generate New Persistent Wallet'}
+                        {contextLoading ? <><Spinner /> Generating…</> : 'Generate New Persistent Wallet'}
                     </button>
                 </div>
 
@@ -222,7 +169,8 @@ export default function WalletPanel({ onRealFund, onWalletConnect }) {
                     They will stay until you click "Disconnect & clear session".
                 </p>
 
-                {error && <ErrorBox message={error} onClose={clearError} />}
+                {uiError && <ErrorBox message={uiError} onClose={() => setUiError('')} />}
+                {contextError && <ErrorBox message={contextError} onClose={() => { }} />}
             </div>
         )
     }
@@ -293,25 +241,25 @@ export default function WalletPanel({ onRealFund, onWalletConnect }) {
             <div className="flex items-center justify-between rounded-xl p-4 mb-5" style={{ background: 'rgba(16,185,129,0.07)', border: '1px solid rgba(16,185,129,0.15)' }}>
                 <div>
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-0.5">Balance</p>
-                    {balanceLoading ? (
+                    {contextLoading ? (
                         <div className="flex items-center gap-2 text-slate-400"><Spinner /> Fetching…</div>
                     ) : balance !== null ? (
                         <p className="text-xl font-bold" style={{ color: '#34d399' }}>
                             {balance.toFixed(8)} <span className="text-sm font-semibold text-emerald-400">BCH</span>
                         </p>
                     ) : (
-                        <p className="text-slate-500 text-sm">Unknown</p>
+                        <p className="text-slate-500 text-sm italic">Not Synced</p>
                     )}
                 </div>
                 <button
                     id="refresh-balance-btn"
                     onClick={() => refreshBalance()}
-                    disabled={balanceLoading}
+                    disabled={contextLoading}
                     className="text-slate-400 hover:text-slate-200 transition-colors p-2 rounded-lg disabled:opacity-40"
                     style={{ background: 'rgba(255,255,255,0.04)' }}
                     title="Refresh balance"
                 >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className={balanceLoading ? 'animate-spin' : ''}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className={contextLoading ? 'animate-spin' : ''}>
                         <path d="M1 4v6h6M23 20v-6h-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                         <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4-4.64 4.36A9 9 0 0 1 3.51 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
@@ -349,7 +297,7 @@ export default function WalletPanel({ onRealFund, onWalletConnect }) {
                         min="0.0001"
                         step="0.001"
                         value={amount}
-                        onChange={(e) => { setAmount(e.target.value); clearError(); setTxStatus('idle'); setTxId('') }}
+                        onChange={(e) => { setAmount(e.target.value); setUiError(''); setTxStatus('idle'); setTxId('') }}
                         placeholder="0.0100"
                         className="input-web3 pr-16"
                         disabled={sendLoading}
@@ -361,7 +309,7 @@ export default function WalletPanel({ onRealFund, onWalletConnect }) {
                     {['0.001', '0.005', '0.01', '0.05'].map((v) => (
                         <button
                             key={v}
-                            onClick={() => { setAmount(v); clearError(); setTxStatus('idle'); setTxId('') }}
+                            onClick={() => { setAmount(v); setUiError(''); setTxStatus('idle'); setTxId('') }}
                             className="flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all"
                             style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', color: '#10b981' }}
                         >
@@ -387,7 +335,8 @@ export default function WalletPanel({ onRealFund, onWalletConnect }) {
                 </button>
             </div>
 
-            {error && <ErrorBox message={error} onClose={clearError} />}
+            {uiError && <ErrorBox message={uiError} onClose={() => setUiError('')} />}
+            {contextError && <ErrorBox message={contextError} onClose={() => { }} />}
 
             {txStatus === 'success' && txId && (
                 <TxSuccess txId={txId} amount={amount} />

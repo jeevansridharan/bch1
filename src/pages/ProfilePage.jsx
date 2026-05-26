@@ -1,11 +1,6 @@
-/**
- * pages/ProfilePage.jsx
- * Wallet identity + account overview (Non-Custodial Refactor)
- */
-
 import React, { useState, useEffect } from 'react'
-import { Copy, CheckCircle, Wallet, Shield, ExternalLink, LogOut } from 'lucide-react'
-import { initializeWallet, getBalance, getTokenBalance, disconnectWallet } from '../services/bchWallet'
+import { Copy, CheckCircle, Wallet, Shield, ExternalLink, LogOut, Key } from 'lucide-react'
+import { useWallet } from '../contexts/WalletContext'
 import { getLockedAmount } from '../services/milestoneContract'
 import { transferGovTokens } from '../services/govService'
 
@@ -23,12 +18,12 @@ function InfoRow({ label, value, mono = false, color = '#94a3b8' }) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ProfilePage() {
-    const [address, setAddress] = useState('')
-    const [copied, setCopied] = useState(false)
-    const [balance, setBalance] = useState(0)
+    const { wallet, address, balance, disconnect } = useWallet()
     const [tokens, setTokens] = useState(0)
     const [locked, setLocked] = useState(0)
     const [loading, setLoading] = useState(false)
+    const [showWif, setShowWif] = useState(false)
+    const [copied, setCopied] = useState(false)
 
     // Token transfer state
     const [recipient, setRecipient] = useState('')
@@ -37,28 +32,23 @@ export default function ProfilePage() {
     const [txStatus, setTxStatus] = useState({ type: '', msg: '', txId: '' })
 
     useEffect(() => {
-        const loadConnectedWallet = async () => {
-            const storedWif = localStorage.getItem('milestara_chipnet_wif')
-            if (storedWif) {
+        const loadStats = async () => {
+            if (wallet) {
                 setLoading(true)
                 try {
-                    const wallet = await initializeWallet(storedWif)
-                    setAddress(wallet.cashaddr)
-                    const bal = await getBalance(wallet)
-                    setBalance(bal)
-
+                    const { getTokenBalance } = await import('../services/bchWallet')
                     const tks = await getTokenBalance(wallet)
                     setTokens(tks)
+                    setLocked(getLockedAmount())
                 } catch (err) {
-                    console.error('[ProfilePage] Failed to reconnect wallet:', err)
+                    console.error('[ProfilePage] Stats fail:', err)
                 } finally {
                     setLoading(false)
                 }
             }
-            setLocked(getLockedAmount())
         }
-        loadConnectedWallet()
-    }, [])
+        loadStats()
+    }, [wallet])
 
     const handleCopy = () => {
         if (!address) return
@@ -68,12 +58,9 @@ export default function ProfilePage() {
     }
 
     const handleDisconnect = () => {
-        disconnectWallet()
-        setAddress('')
+        disconnect()
         setTokens(0)
         setLocked(0)
-        // Clear session
-        window.location.reload()
     }
 
     return (
@@ -98,7 +85,7 @@ export default function ProfilePage() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
                             <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: address ? '#10b981' : '#475569', boxShadow: address ? '0 0 6px rgba(16,185,129,0.8)' : 'none' }} />
                             <span style={{ fontSize: '0.75rem', color: address ? '#10b981' : '#475569', fontWeight: 600 }}>
-                                {address ? 'Active Session · Chipnet' : 'Session Inactive'}
+                                {address ? 'Non-Custodial · Chipnet' : 'Session Inactive'}
                             </span>
                         </div>
                     </div>
@@ -108,9 +95,9 @@ export default function ProfilePage() {
                 {address ? (
                     <>
                         <InfoRow label="Wallet Address" value={address} mono color="#10b981" />
-                        <InfoRow label="BCH Balance" value={`${balance.toFixed(8)} BCH`} color="#10b981" />
+                        <InfoRow label="BCH Balance" value={`${(balance || 0).toFixed(8)} BCH`} color="#10b981" />
                         <InfoRow label="Network" value="Bitcoin Cash Chipnet (Testnet)" color="#34d399" />
-                        <InfoRow label="Session GOV Tokens" value={`${tokens} tokens`} color="#10b981" />
+                        <InfoRow label="GOV Tokens" value={`${tokens} tokens`} color="#10b981" />
                         <InfoRow label="Locked BCH" value={`${locked.toFixed(8)} BCH`} color="#34d399" />
 
                         <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
@@ -140,6 +127,28 @@ export default function ProfilePage() {
                                 <ExternalLink size={14} /> View on Explorer
                             </a>
                         </div>
+
+                        {/* Secret Recovery Section */}
+                        <div style={{ marginTop: '24px', padding: '16px', borderRadius: '12px', background: 'rgba(244,63,94,0.03)', border: '1px solid rgba(244,63,94,0.1)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+                                <Key size={14} color="#f43f5e" />
+                                <span style={{ color: '#f43f5e', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase' }}>Backup Key (WIF)</span>
+                            </div>
+
+                            {!showWif ? (
+                                <button
+                                    onClick={() => setShowWif(true)}
+                                    style={{ width: '100%', padding: '10px', borderRadius: '8px', background: 'rgba(244,63,94,0.1)', color: '#f43f5e', border: '1px dashed rgba(244,63,94,0.3)', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
+                                >
+                                    Reveal Secret Recovery Key
+                                </button>
+                            ) : (
+                                <div style={{ wordBreak: 'break-all', fontSize: '0.75rem', color: '#fda4af', border: '1px solid rgba(244,63,94,0.2)', background: 'rgba(0,0,0,0.2)', padding: '12px', borderRadius: '8px', fontFamily: 'monospace' }}>
+                                    {wallet?.privateKeyWif}
+                                    <p style={{ marginTop: '10px', fontSize: '10px', color: '#f43f5e', fontWeight: 600 }}>⚠️ NEVER share this key. Anyone with this key can steal your funds.</p>
+                                </div>
+                            )}
+                        </div>
                     </>
                 ) : (
                     <div style={{ textAlign: 'center', padding: '20px 0' }}>
@@ -159,10 +168,10 @@ export default function ProfilePage() {
                     </h2>
                 </div>
                 {[
-                    'Non-Custodial: Your private keys are stored securely in your browser\'s local storage.',
-                    'Persistent: Your wallet stays active across page refreshes and browser restarts.',
-                    'This is a TESTNET wallet. Do not send real BCH to these addresses.',
-                    'Identity Persistence: To remove the wallet, you must click the Disconnect button.',
+                    'Self-Custody: You own your keys. We never store them on any server.',
+                    'Persistent Identity: Your wallet is saved in your browser until you disconnect.',
+                    'Burner-to-Account: By backing up your Recovery Key, you can restore this wallet anywhere.',
+                    'Chipnet Only: This wallet operates on the test network for safety.',
                 ].map((note, i) => (
                     <p key={i} style={{ color: '#64748b', fontSize: '0.8rem', lineHeight: 1.7 }}>• {note}</p>
                 ))}
@@ -228,13 +237,10 @@ export default function ProfilePage() {
                                 setTxLoading(true)
                                 setTxStatus({ type: '', msg: '', txId: '' })
                                 try {
-                                    const wallet = await initializeWallet()
                                     const res = await transferGovTokens(wallet, recipient, parseInt(sendAmount))
                                     setTxStatus({ type: 'success', msg: `Sent ${sendAmount} tokens!`, txId: res.txId })
                                     setSendAmount('')
-                                    // Refresh balance
-                                    const tks = await getTokenBalance(wallet)
-                                    setTokens(tks)
+                                    // Stats are auto-refreshed by useEffect [wallet] if we triggered an on-chain change
                                 } catch (err) {
                                     setTxStatus({ type: 'error', msg: err.message })
                                 } finally {
