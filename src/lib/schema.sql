@@ -47,16 +47,20 @@ CREATE POLICY "users: update own"
 -- Uses owner_wallet directly — no FK to users (allows anonymous projects)
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS projects (
-    id           UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    title        TEXT        NOT NULL,
-    description  TEXT        NOT NULL DEFAULT '',
-    goal_amount  NUMERIC(18,8) NOT NULL CHECK (goal_amount > 0),
-    raised_amount NUMERIC(18,8) NOT NULL DEFAULT 0 CHECK (raised_amount >= 0),
-    owner_wallet TEXT        NOT NULL,
-    status       TEXT        NOT NULL DEFAULT 'active'
-                             CHECK (status IN ('active', 'funded', 'completed', 'cancelled')),
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    title            TEXT        NOT NULL,
+    description      TEXT        NOT NULL DEFAULT '',
+    goal_amount      NUMERIC(18,8) NOT NULL CHECK (goal_amount > 0),
+    raised_amount    NUMERIC(18,8) NOT NULL DEFAULT 0 CHECK (raised_amount >= 0),
+    owner_wallet     TEXT        NOT NULL,
+    contract_address TEXT        NOT NULL DEFAULT '',
+    status           TEXT        NOT NULL DEFAULT 'active'
+                                 CHECK (status IN ('active', 'funded', 'completed', 'cancelled')),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Add contract_address if upgrading an existing database (idempotent)
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS contract_address TEXT NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_projects_owner_wallet ON projects(owner_wallet);
 CREATE INDEX IF NOT EXISTS idx_projects_status       ON projects(status);
@@ -92,8 +96,14 @@ CREATE TABLE IF NOT EXISTS milestones (
     description TEXT        NOT NULL DEFAULT '',
     amount      NUMERIC(18,8) NOT NULL CHECK (amount > 0),
     approved    BOOLEAN     NOT NULL DEFAULT false,
+    status      TEXT        NOT NULL DEFAULT 'pending'
+                            CHECK (status IN ('pending', 'voting', 'approved', 'released', 'rejected')),
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Add status column if upgrading an existing database (idempotent)
+ALTER TABLE milestones ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'voting', 'approved', 'released', 'rejected'));
 
 CREATE INDEX IF NOT EXISTS idx_milestones_project_id ON milestones(project_id);
 CREATE INDEX IF NOT EXISTS idx_milestones_approved   ON milestones(approved);

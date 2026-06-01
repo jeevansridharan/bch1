@@ -162,17 +162,32 @@ export async function fetchMilestonesByProject(projectId) {
 export async function updateMilestoneStatus(milestoneId, status) {
     if (!milestoneId) throw new Error('milestoneId is required')
 
-    // DB uses `approved` boolean — map status string accordingly
+    const validStatuses = ['pending', 'voting', 'approved', 'released', 'rejected']
+    if (!validStatuses.includes(status)) throw new Error(`Invalid status: ${status}`)
+
+    // `approved` boolean and `status` text are kept in sync
     const approved = status === 'approved' || status === 'released'
 
     const { data, error } = await supabase
         .from('milestones')
-        .update({ approved })
+        .update({ approved, status })   // write both columns
         .eq('id', milestoneId)
         .select()
         .single()
 
     if (error) {
+        // If the `status` column doesn't exist yet (old DB), fall back to approved-only update
+        if (error.code === '42703' || error.code === 'PGRST204') {
+            console.warn('[db/milestones] `status` column missing — falling back to `approved` only. Run schema.sql to fix.')
+            const retry = await supabase
+                .from('milestones')
+                .update({ approved })
+                .eq('id', milestoneId)
+                .select()
+                .single()
+            if (retry.error) throw new Error(retry.error.message)
+            return retry.data
+        }
         console.error('[db/milestones] updateMilestoneStatus error:', error)
         throw new Error(error.message)
     }
