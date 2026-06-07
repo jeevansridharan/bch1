@@ -322,20 +322,23 @@ export async function fetchProjectById(id) {
             return { data: null, error }
         }
 
-        // Process milestones to aggregate vote tallies
+        // Process milestones: aggregate vote tallies and derive isApproved from status column.
+        // Both `approved` (boolean) and `status` (text) exist in the verified schema.
+        // `status` is the single source of truth — `approved` is kept in sync by updateMilestoneStatus().
         if (data && data.milestones) {
             data.milestones = data.milestones.map(m => {
                 const votes = m.votes ?? []
-                const yesWeight = votes.filter(v => v.vote === true).reduce((s, v) => s + v.token_amount, 0)
-                const noWeight = votes.filter(v => v.vote === false).reduce((s, v) => s + v.token_amount, 0)
+                const yesWeight = votes.filter(v => v.vote === true).reduce((s, v) => s + Number(v.token_amount), 0)
+                const noWeight  = votes.filter(v => v.vote === false).reduce((s, v) => s + Number(v.token_amount), 0)
 
                 return {
                     ...m,
-                    votes: undefined, // remove raw array to keep it clean
-                    voteYes: yesWeight,
-                    voteNo: noWeight,
-                    voteTotal: yesWeight + noWeight,
-                    isApproved: m.approved || (yesWeight + noWeight > 0 && yesWeight / (yesWeight + noWeight) > 0.5)
+                    votes:      undefined, // remove raw join array — use voteYes/voteNo instead
+                    voteYes:    yesWeight,
+                    voteNo:     noWeight,
+                    voteTotal:  yesWeight + noWeight,
+                    // Read from DB status column (authoritative); fall back to approved boolean
+                    isApproved: m.status === 'approved' || m.status === 'released' || m.approved === true,
                 }
             })
         }

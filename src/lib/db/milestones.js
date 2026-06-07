@@ -3,21 +3,22 @@
  *
  * All Supabase operations for the `milestones` table.
  *
- * Schema (run in Supabase SQL Editor):
- *   CREATE TABLE milestones (
- *     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
- *     project_id       UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
- *     title            TEXT NOT NULL,
- *     description      TEXT,
- *     amount_allocated NUMERIC(18, 8) NOT NULL,
- *     status           TEXT NOT NULL DEFAULT 'pending'
- *                      CHECK (status IN ('pending', 'voting', 'approved', 'released', 'rejected')),
- *     created_at       TIMESTAMPTZ DEFAULT now()
- *   );
- *   ALTER TABLE milestones ENABLE ROW LEVEL SECURITY;
- *   CREATE POLICY "Public read"    ON milestones FOR SELECT USING (true);
- *   CREATE POLICY "Creator insert" ON milestones FOR INSERT WITH CHECK (true);
- *   CREATE POLICY "Creator update" ON milestones FOR UPDATE USING (true);
+ * Verified schema (src/lib/schema.sql — TABLE 3: milestones):
+ *   id          UUID        PRIMARY KEY DEFAULT gen_random_uuid()
+ *   project_id  UUID        NOT NULL REFERENCES projects(id) ON DELETE CASCADE
+ *   title       TEXT        NOT NULL
+ *   description TEXT        NOT NULL DEFAULT ''
+ *   amount      NUMERIC(18,8) NOT NULL CHECK (amount > 0)   ← column is `amount`, not `amount_allocated`
+ *   approved    BOOLEAN     NOT NULL DEFAULT false           ← boolean flag kept in sync with status
+ *   status      TEXT        NOT NULL DEFAULT 'pending'
+ *              CHECK (status IN ('pending', 'voting', 'approved', 'released', 'rejected'))
+ *   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+ *
+ * Column rules:
+ *   • Always write BOTH `approved` (boolean) and `status` (text) together on every
+ *     insert and update so the DB view `milestone_vote_summary` stays consistent.
+ *   • approved = true  ↔  status IN ('approved', 'released')
+ *   • approved = false ↔  status IN ('pending', 'voting', 'rejected')
  */
 
 import { supabase } from '../supabase'
@@ -49,11 +50,12 @@ export async function createMilestone({ projectId, title, description, amountAll
     const { data, error } = await supabase
         .from('milestones')
         .insert({
-            project_id: projectId,
-            title: title.trim(),
+            project_id:  projectId,
+            title:       title.trim(),
             description: description?.trim() ?? '',
-            amount: amountAllocated,   // ← DB column is `amount`
-            approved: false,              // ← DB uses boolean, not status text
+            amount:      amountAllocated,  // DB column is `amount` (not `amount_allocated`)
+            approved:    false,            // boolean — kept in sync with status
+            status:      'pending',        // text lifecycle status — explicit even though DB defaults it
         })
         .select()
         .single()
@@ -83,11 +85,12 @@ export async function createMilestoneBatch(projectId, milestonesArray) {
     if (!milestonesArray?.length) throw new Error('milestonesArray must not be empty')
 
     const rows = milestonesArray.map(m => ({
-        project_id: projectId,
-        title: m.title.trim(),
+        project_id:  projectId,
+        title:       m.title.trim(),
         description: m.description?.trim() ?? '',
-        amount: m.amountAllocated,   // ← DB column is `amount`
-        approved: false,               // ← DB uses boolean
+        amount:      m.amountAllocated,  // DB column is `amount` (not `amount_allocated`)
+        approved:    false,              // boolean — kept in sync with status
+        status:      'pending',          // text lifecycle status — explicit
     }))
 
     const { data, error } = await supabase
@@ -131,18 +134,21 @@ export async function fetchMilestonesByProject(projectId) {
         throw new Error(error.message)
     }
 
-    // Compute yes/no tallies locally from the joined vote rows
+    // Aggregate vote tallies and derive isApproved from the authoritative `status` column.
+    // Both `approved` (boolean) and `status` (text) exist in the DB and are kept in sync
+    // by updateMilestoneStatus(), so we read `status` as the single source of truth.
     return (data ?? []).map(m => {
         const votes = m.votes ?? []
-        const yesWeight = votes.filter(v => v.vote === true).reduce((s, v) => s + v.token_amount, 0)
-        const noWeight = votes.filter(v => v.vote === false).reduce((s, v) => s + v.token_amount, 0)
+        const yesWeight = votes.filter(v => v.vote === true).reduce((s, v) => s + Number(v.token_amount), 0)
+        const noWeight  = votes.filter(v => v.vote === false).reduce((s, v) => s + Number(v.token_amount), 0)
         return {
             ...m,
-            votes: undefined,   // remove raw array
-            voteYes: yesWeight,
-            voteNo: noWeight,
-            voteTotal: yesWeight + noWeight,
-            isApproved: m.approved || (yesWeight + noWeight > 0 && yesWeight / (yesWeight + noWeight) > 0.5),
+            votes:      undefined,  // remove raw join array — use voteYes/voteNo instead
+            voteYes:    yesWeight,
+            voteNo:     noWeight,
+            voteTotal:  yesWeight + noWeight,
+            // isApproved: read from DB status column (authoritative); fall back to approved boolean
+            isApproved: m.status === 'approved' || m.status === 'released' || m.approved === true,
         }
     })
 }
@@ -165,29 +171,20 @@ export async function updateMilestoneStatus(milestoneId, status) {
     const validStatuses = ['pending', 'voting', 'approved', 'released', 'rejected']
     if (!validStatuses.includes(status)) throw new Error(`Invalid status: ${status}`)
 
-    // `approved` boolean and `status` text are kept in sync
+    // Both `approved` (boolean) and `status` (text) exist in the verified schema.
+    // We always write both together so the DB view `milestone_vote_summary` stays consistent.
+    //   approved = true  ↔  status IN ('approved', 'released')
+    //   approved = false ↔  status IN ('pending', 'voting', 'rejected')
     const approved = status === 'approved' || status === 'released'
 
     const { data, error } = await supabase
         .from('milestones')
-        .update({ approved, status })   // write both columns
+        .update({ approved, status })   // write both columns — schema has both
         .eq('id', milestoneId)
         .select()
         .single()
 
     if (error) {
-        // If the `status` column doesn't exist yet (old DB), fall back to approved-only update
-        if (error.code === '42703' || error.code === 'PGRST204') {
-            console.warn('[db/milestones] `status` column missing — falling back to `approved` only. Run schema.sql to fix.')
-            const retry = await supabase
-                .from('milestones')
-                .update({ approved })
-                .eq('id', milestoneId)
-                .select()
-                .single()
-            if (retry.error) throw new Error(retry.error.message)
-            return retry.data
-        }
         console.error('[db/milestones] updateMilestoneStatus error:', error)
         throw new Error(error.message)
     }
