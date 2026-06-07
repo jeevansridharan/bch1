@@ -15,6 +15,12 @@
 import { TestNetWallet } from 'mainnet-js'
 import { mintGovTokens, GOV_TOKEN_CATEGORY_ID } from './govService'
 
+// ── Oracle Backend URL ────────────────────────────────────────────────────────
+// Reads from VITE_ORACLE_URL env var (set in .env for local, and in your
+// hosting provider's env settings for production).
+// Falls back to localhost:3001 so local development works out of the box.
+const ORACLE_URL = import.meta.env.VITE_ORACLE_URL || 'http://localhost:3001'
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 // How many governance tokens to mint per 1 BCH (Session Unit: 1 BCH = 100,000 GOV)
@@ -175,11 +181,12 @@ export async function releaseMilestoneFunds(
     console.log(`[milestoneContract]   Project  : ${projectId}`)
 
     // ── STEP 1: Request oracle signature from the backend ─────────────────────
-    console.log('[milestoneContract] ▶ Calling Oracle backend…')
+    const oracleSignUrl = `${ORACLE_URL}/api/oracle/sign`
+    console.log('[milestoneContract] ▶ Calling Oracle backend…', oracleSignUrl)
 
     let oracleResponse
     try {
-        const response = await fetch('http://localhost:3001/api/oracle/sign', {
+        const response = await fetch(oracleSignUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ milestoneId, projectId }),
@@ -191,10 +198,12 @@ export async function releaseMilestoneFunds(
             throw new Error(oracleResponse.error ?? `Oracle server error: HTTP ${response.status}`)
         }
     } catch (fetchErr) {
-        if (fetchErr.name === 'TypeError' && fetchErr.message.includes('fetch')) {
+        // Network-level failure (server not running, wrong URL, CORS block, etc.)
+        if (fetchErr.name === 'TypeError' && fetchErr.message.toLowerCase().includes('fetch')) {
             throw new Error(
-                'Cannot reach Oracle backend. ' +
-                'Make sure it is running: cd backend && npm start'
+                `Cannot reach Oracle backend at ${oracleSignUrl}. ` +
+                'For local dev: cd backend && npm start. ' +
+                'For production: set the VITE_ORACLE_URL environment variable to your deployed backend URL.'
             )
         }
         throw fetchErr
