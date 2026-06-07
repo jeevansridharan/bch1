@@ -42,6 +42,7 @@ const {
     SUPABASE_SERVICE_ROLE_KEY,
     ORACLE_WIF,
     PORT = 3001,
+    FRONTEND_ORIGIN = 'http://localhost:5173',
 } = process.env
 
 const missingVars = []
@@ -64,6 +65,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 })
 
 console.log('[Oracle] ✓ Supabase client initialised →', SUPABASE_URL)
+console.log('[Oracle] ✓ Allowed frontend origin    →', FRONTEND_ORIGIN)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 3. Pre-load Oracle key pair (once at startup)
@@ -99,11 +101,13 @@ try {
 
 const app = express()
 
-// Allow requests from the Vite dev server only
+// Allow requests from the configured frontend origin
+// Set FRONTEND_ORIGIN in backend/.env for production deployments
 app.use(cors({
-    origin: 'http://localhost:5173',
+    origin: FRONTEND_ORIGIN,
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type'],
+    credentials: true,
 }))
 
 app.use(express.json())
