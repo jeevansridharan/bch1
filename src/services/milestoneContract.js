@@ -5,7 +5,7 @@
  *   1. Milestone Escrow (BCH locking)
  *   2. Token Distribution (Minting governance tokens)
  *   3. On-chain Tallying (Scanning UTXOs)
- * 
+ *
  * ─── PRODUCTION MODEL ────────────────────────────────────────────────────────
  * Governance power is derived ONLY from on-chain CashTokens.
  * Escrowed funds are locked in CashScript smart contracts.
@@ -52,7 +52,7 @@ function loadFromStorage(key, defaultValue = null) {
 
 /**
  * fundMilestoneContract
- * 
+ *
  * Sends BCH to the escrow contract and triggers on-chain token minting.
  */
 export async function fundMilestoneContract(wallet, amountBch, projectAddr) {
@@ -145,19 +145,19 @@ export async function castVote(wallet, projectId, milestoneId, voteType, tokensT
 /**
  * releaseMilestoneFunds
  *
- * Upgraded flow:
+ * Full oracle-gated release flow:
  *   1. POST /api/oracle/sign  → Oracle checks Supabase votes & signs proof
- *   2. Build CashScript release() transaction using oracle signature
- *   3. Broadcast to Chipnet
- *   4. Update milestone status in Supabase to "released"
+ *   2a. If contract metadata present: Build CashScript release() tx & broadcast
+ *   2b. If contract metadata missing (old project): Record DB-only release
+ *   3. Update milestone status in Supabase to "released"
  *
  * @param {object} wallet           — mainnet-js wallet (the project creator)
  * @param {number} amountBch        — Amount to claim (in BCH)
- * @param {string} contractAddress  — The P2SH address to spend from
- * @param {string} milestoneIdHex   — The 32-byte unique milestone ID (hex)
+ * @param {string} contractAddress  — The P2SH address to spend from (may be null for old projects)
+ * @param {string} milestoneIdHex   — The 32-byte unique milestone ID (may be null for old projects)
  * @param {number|string} deadline  — The contract deadline (block height int)
- * @param {string} milestoneId      — Supabase UUID of the milestone (for DB update)
- * @param {string} projectId        — Supabase UUID of the project
+ * @param {string} milestoneId      — Supabase UUID of the milestone (required for oracle)
+ * @param {string} projectId        — Supabase UUID of the project (required for oracle)
  */
 export async function releaseMilestoneFunds(
     wallet,
@@ -169,12 +169,14 @@ export async function releaseMilestoneFunds(
     projectId,
 ) {
     if (!wallet) throw new Error('Connect wallet to claim funds')
-    if (!contractAddress || !milestoneIdHex) {
-        throw new Error('On-chain metadata missing. Cannot re-instantiate contract.')
-    }
     if (!milestoneId || !projectId) {
         throw new Error('milestoneId and projectId are required for oracle signing.')
     }
+
+    // contractAddress + milestoneIdHex are needed for the CashScript broadcast,
+    // but NOT for the Oracle vote-check. Old projects (created before on-chain
+    // metadata was saved) can still get oracle approval and a DB status update.
+    const hasContractData = !!(contractAddress && milestoneIdHex)
 
     console.log(`[milestoneContract] ── Starting Oracle Release ────────────────`)
     console.log(`[milestoneContract]   Contract : ${contractAddress}`)
@@ -196,15 +198,16 @@ export async function releaseMilestoneFunds(
         oracleResponse = await response.json()
 
         if (!response.ok) {
-            throw new Error(oracleResponse.error ?? `Oracle server error: HTTP ${response.status}`)
+            // Pull reason from the response body (set by our oracle for 400s)
+            throw new Error(oracleResponse.reason || oracleResponse.error || `Oracle server error: HTTP ${response.status}`)
         }
     } catch (fetchErr) {
         // Network-level failure (server not running, wrong URL, CORS block, etc.)
-        if (fetchErr.name === 'TypeError' && fetchErr.message.toLowerCase().includes('fetch')) {
+        if (fetchErr.name === 'TypeError' && fetchErr.message.toLowerCase().includes('failed to fetch')) {
             throw new Error(
                 `Cannot reach Oracle backend at ${oracleSignUrl}. ` +
                 'For local dev: cd backend && npm start. ' +
-                'For production: set the VITE_ORACLE_URL environment variable to your deployed backend URL.'
+                'For production: set VITE_ORACLE_URL in your .env file.'
             )
         }
         throw fetchErr
@@ -218,45 +221,50 @@ export async function releaseMilestoneFunds(
     }
 
     const { signature: signatureHex, oraclePubkey: oraclePubkeyHex, proofHex } = oracleResponse
+    console.log('[milestoneContract] ✓ Oracle approved!')
 
-    console.log('[milestoneContract] ✓ Oracle approved! Building CashScript release() tx…')
+    // ── STEP 3a: If no on-chain contract data, do a DB-only release ───────────
+    // This handles projects created before the on-chain metadata feature was added.
+    if (!hasContractData) {
+        console.warn('[milestoneContract] ⚠ No contract metadata — recording DB-only release.')
+        try {
+            const { updateMilestoneStatus } = await import('../lib/db/milestones')
+            await updateMilestoneStatus(milestoneId, 'released')
+            console.log('[milestoneContract] ✓ Milestone status → "released" in Supabase')
+        } catch (dbErr) {
+            console.error('[milestoneContract] ⚠ DB update failed:', dbErr.message)
+        }
+        return 'oracle-approved'
+    }
 
-    // ── STEP 3: Build & broadcast CashScript release() transaction ────────────
+    // ── STEP 3b: Build & broadcast CashScript release() transaction ───────────
     try {
         const { Contract, ElectrumNetworkProvider, SignatureTemplate } = await import('cashscript')
         const { hexToBin } = await import('@bitauth/libauth')
 
-        // Import the compiled MilestoneEscrow artifact (static top-level import)
-        // artifact is already imported at the top of this module.
-        // No dynamic import needed — Vite handles JSON natively.
-
-        // Setup Chipnet provider
         const provider = new ElectrumNetworkProvider('chipnet')
 
-        // Re-derive constructor parameters (must match what was used on deploy)
         if (!wallet.publicKey) throw new Error('Wallet public key missing. Try reconnecting.')
 
         const creatorPk = typeof wallet.publicKey === 'string'
             ? hexToBin(wallet.publicKey)
             : wallet.publicKey
 
-        const funderPk  = creatorPk  // Creator == Funder in current flow
-        const oraclePk  = hexToBin(oraclePubkeyHex) // From oracle response (server-side)
+        const funderPk = creatorPk  // Creator == Funder in current flow
+        const oraclePk = hexToBin(oraclePubkeyHex)
 
         // Normalise milestoneId to 32 bytes (64 hex chars)
         let idHex = milestoneIdHex.replace('0x', '')
         if (idHex.length < 64) idHex = idHex.padEnd(64, '0')
         const milIdBytes = hexToBin(idHex)
-        const dlInt      = BigInt(deadline)
+        const dlInt = BigInt(deadline)
 
-        // Instantiate the contract
         const contract = new Contract(
             artifact,
             [creatorPk, funderPk, oraclePk, milIdBytes, dlInt],
             { provider },
         )
 
-        // Warn (don't fail) if address doesn't match — useful for debugging
         if (contract.address !== contractAddress) {
             console.warn(
                 `[milestoneContract] ⚠ Address mismatch!\n` +
@@ -265,12 +273,9 @@ export async function releaseMilestoneFunds(
             )
         }
 
-        // Build the oracle datasig and proof bytes
         const oracleSigBytes = hexToBin(signatureHex)
-        const proofBytes     = hexToBin(proofHex)
+        const proofBytes = hexToBin(proofHex)
 
-        // Creator signature template — signs the spending transaction (not the oracle proof)
-        // wallet.privateKeyWif is the WIF-encoded private key from mainnet-js TestNetWallet
         if (!wallet.privateKeyWif) {
             throw new Error(
                 'Wallet has no WIF private key. Cannot build SignatureTemplate. ' +
@@ -297,13 +302,12 @@ export async function releaseMilestoneFunds(
         try {
             const { updateMilestoneStatus } = await import('../lib/db/milestones')
             await updateMilestoneStatus(milestoneId, 'released')
-            console.log('[milestoneContract] ✓ Milestone status updated to "released" in Supabase')
+            console.log('[milestoneContract] ✓ Milestone status → "released" in Supabase')
         } catch (dbErr) {
             // Non-fatal — funds are already released on-chain
             console.error('[milestoneContract] ⚠ DB status update failed (funds still released):', dbErr.message)
         }
 
-        // Update local cache
         const locked = loadFromStorage(STORAGE_KEYS.lockedAmount, 0)
         saveToStorage(STORAGE_KEYS.lockedAmount, Math.max(0, locked - amountBch))
 

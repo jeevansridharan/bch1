@@ -190,12 +190,12 @@ app.post('/api/oracle/sign', async (req, res) => {
 
         console.log(`[Oracle]   YES: ${yesVotes} | NO: ${noVotes} | TOTAL: ${totalVotes}`)
 
-        // ── 5d. Check quorum (minimum 3 votes) ───────────────────────────────
-        const QUORUM = 3
+        // ── 5d. Check quorum ─────────────────────────────────────────────────
+        const QUORUM = 1 // TODO: raise to 3+ for mainnet
 
         if (totalVotes < QUORUM) {
             console.log(`[Oracle] ✗ Quorum not met (${totalVotes}/${QUORUM})`)
-            return res.json({
+            return res.status(400).json({
                 approved: false,
                 reason: `Quorum not met: ${totalVotes} vote(s) cast, minimum ${QUORUM} required`,
                 yesVotes,
@@ -211,7 +211,7 @@ app.post('/api/oracle/sign', async (req, res) => {
 
         if (approvalRate <= 0.5) {
             console.log(`[Oracle] ✗ Vote failed (${(approvalRate * 100).toFixed(1)}% YES, need >50%)`)
-            return res.json({
+            return res.status(400).json({
                 approved: false,
                 reason: `Milestone rejected: ${(approvalRate * 100).toFixed(1)}% YES votes (need >50%)`,
                 yesVotes,

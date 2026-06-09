@@ -269,14 +269,7 @@ export default function Dashboard({ project: initialProject, onFund, onVote, onT
                         milestones.map((milestone, index) => (
                             <MilestoneCard
                                 key={milestone.id}
-                                milestone={{
-                                    ...milestone,
-                                    // Override UI votes with blockchain-weighted tally if available
-                                    onChainVotes: {
-                                        yes: onChainTally.yesVotes,
-                                        no: onChainTally.noVotes
-                                    }
-                                }}
+                                milestone={milestone}
                                 index={index}
                                 onVote={handleMilestoneVote}
                             />
