@@ -154,19 +154,22 @@ export default function GovernancePanel({
         }
     }
 
-    const handleRelease = async (milestoneId, amountBch) => {
+    const handleRelease = async (milestoneDbId, amountBch) => {
         setError('')
-        setReleaseId(milestoneId)
+        setReleaseId(milestoneDbId)
         try {
-            // PASS THE CONTRACT DATA FOR ORACLE VALIDATION
+            // Pass all 7 args: wallet, amountBch, contractAddress, milestoneIdHex,
+            // deadline, milestoneId (Supabase UUID for oracle vote lookup), projectId
             const txId = await releaseMilestoneFunds(
                 wallet,
                 amountBch,
                 contractAddress,
                 milestoneIdHex,
-                deadline
+                deadline,
+                milestoneDbId,  // ← Supabase milestone UUID  (oracle queries votes by this)
+                projectId,      // ← Supabase project UUID    (oracle uses this for logging)
             )
-            setReleaseTxId(prev => ({ ...prev, [milestoneId]: txId }))
+            setReleaseTxId(prev => ({ ...prev, [milestoneDbId]: txId }))
             if (onTransaction) {
                 onTransaction(amountBch, txId, 'release')
             }
@@ -339,13 +342,13 @@ export default function GovernancePanel({
                                         <>
                                             <button
                                                 onClick={() => handleRelease(m.id, m.amountAllocated || 0.01)}
-                                                disabled={releaseId === m.id || !contractAddress}
+                                                disabled={releaseId === m.id || !contractAddress || !milestoneIdHex}
                                                 className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all"
                                                 style={{
                                                     background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                                                     color: 'white',
                                                     boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)',
-                                                    opacity: releaseId === m.id || !contractAddress ? 0.5 : 1
+                                                    opacity: releaseId === m.id || !contractAddress || !milestoneIdHex ? 0.5 : 1
                                                 }}
                                             >
                                                 {releaseId === m.id ? <Spinner /> : '🚀 Release Funds to Creator'}

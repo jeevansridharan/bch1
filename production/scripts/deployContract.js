@@ -31,7 +31,7 @@
  */
 
 import { Contract, ElectrumNetworkProvider } from 'cashscript';
-import { binToHex }                           from '@cashscript/utils';
+import { binToHex }                           from '@bitauth/libauth';
 import artifact                               from '../contracts/MilestoneEscrow.json' assert { type: 'json' };
 
 // ── Chipnet block explorer base URL (for human-readable logs) ─────────────────

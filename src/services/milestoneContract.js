@@ -14,6 +14,7 @@
 
 import { TestNetWallet } from 'mainnet-js'
 import { mintGovTokens, GOV_TOKEN_CATEGORY_ID } from './govService'
+import artifact from '../../production/contracts/MilestoneEscrow.json'
 
 // ── Oracle Backend URL ────────────────────────────────────────────────────────
 // Reads from VITE_ORACLE_URL env var (set in .env for local, and in your
@@ -225,11 +226,9 @@ export async function releaseMilestoneFunds(
         const { Contract, ElectrumNetworkProvider, SignatureTemplate } = await import('cashscript')
         const { hexToBin } = await import('@bitauth/libauth')
 
-        // Import the compiled MilestoneEscrow artifact
-        const artifactModule = await import('../../production/contracts/MilestoneEscrow.json', {
-            assert: { type: 'json' },
-        }).catch(() => import('../../production/contracts/MilestoneEscrow.json'))
-        const artifact = artifactModule.default ?? artifactModule
+        // Import the compiled MilestoneEscrow artifact (static top-level import)
+        // artifact is already imported at the top of this module.
+        // No dynamic import needed — Vite handles JSON natively.
 
         // Setup Chipnet provider
         const provider = new ElectrumNetworkProvider('chipnet')
@@ -270,7 +269,14 @@ export async function releaseMilestoneFunds(
         const oracleSigBytes = hexToBin(signatureHex)
         const proofBytes     = hexToBin(proofHex)
 
-        // Creator signature template (signs the release transaction)
+        // Creator signature template — signs the spending transaction (not the oracle proof)
+        // wallet.privateKeyWif is the WIF-encoded private key from mainnet-js TestNetWallet
+        if (!wallet.privateKeyWif) {
+            throw new Error(
+                'Wallet has no WIF private key. Cannot build SignatureTemplate. ' +
+                'Ensure the wallet was initialised with initializeWallet() from bchWallet.js.'
+            )
+        }
         const creatorSigTemplate = new SignatureTemplate(wallet.privateKeyWif)
 
         // Calculate release amount (deduct a 1000 sat miner fee)
