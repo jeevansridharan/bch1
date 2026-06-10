@@ -171,15 +171,22 @@ export async function updateMilestoneStatus(milestoneId, status) {
     const validStatuses = ['pending', 'voting', 'approved', 'released', 'rejected']
     if (!validStatuses.includes(status)) throw new Error(`Invalid status: ${status}`)
 
-    // Both `approved` (boolean) and `status` (text) exist in the verified schema.
-    // We always write both together so the DB view `milestone_vote_summary` stays consistent.
+    // `approved` (boolean) is the column that exists in the current live DB.
+    // `status` (text) does NOT yet exist — run the migration SQL below to add it.
+    // Until then, we only write `approved` so the PATCH doesn't error.
     //   approved = true  ↔  status IN ('approved', 'released')
     //   approved = false ↔  status IN ('pending', 'voting', 'rejected')
+    //
+    // Migration (run once in Supabase SQL Editor):
+    //   ALTER TABLE milestones ADD COLUMN status text NOT NULL DEFAULT 'pending'
+    //     CHECK (status IN ('pending','voting','approved','released','rejected'));
+    //   UPDATE milestones SET status = CASE WHEN approved THEN 'approved' ELSE 'pending' END;
+    // After running the migration, restore the update payload to: { approved, status }
     const approved = status === 'approved' || status === 'released'
 
     const { data, error } = await supabase
         .from('milestones')
-        .update({ approved, status })   // write both columns — schema has both
+        .update({ approved })           // ← only `approved` until status column is added
         .eq('id', milestoneId)
         .select()
         .single()

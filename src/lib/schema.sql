@@ -163,7 +163,47 @@ CREATE POLICY "transactions: insert for all"
 
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- TABLE 5: votes
+-- TABLE 5: contracts
+-- Stores CashScript constructor params so funds can be released later.
+-- One row per project (upserted on every deploy).
+-- ─────────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS contracts (
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id       UUID        NOT NULL UNIQUE
+                                 REFERENCES projects(id) ON DELETE CASCADE,
+    contract_address TEXT        NOT NULL,
+    creator_pubkey   TEXT        NOT NULL,   -- hex 33-byte compressed pubkey
+    funder_pubkey    TEXT        NOT NULL,   -- hex 33-byte compressed pubkey
+    oracle_pubkey    TEXT        NOT NULL,   -- hex 33-byte compressed pubkey
+    milestone_id_hex TEXT        NOT NULL,   -- hex 32-byte milestone ID
+    deadline         BIGINT      NOT NULL,   -- block height
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_contracts_project_id      ON contracts(project_id);
+CREATE INDEX IF NOT EXISTS idx_contracts_contract_address ON contracts(contract_address);
+
+ALTER TABLE contracts ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "contracts: public read"    ON contracts;
+DROP POLICY IF EXISTS "contracts: insert for all" ON contracts;
+DROP POLICY IF EXISTS "contracts: update for all" ON contracts;
+
+CREATE POLICY "contracts: public read"
+    ON contracts FOR SELECT
+    USING (true);
+
+CREATE POLICY "contracts: insert for all"
+    ON contracts FOR INSERT
+    WITH CHECK (true);
+
+CREATE POLICY "contracts: update for all"
+    ON contracts FOR UPDATE
+    USING (true);
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- TABLE 6: votes
 -- Token-weighted voting — one wallet per milestone (enforced by UNIQUE)
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS votes (
