@@ -175,9 +175,13 @@ export default function GovernancePanel({
                 milestoneDbId,
                 projectId,
             )
-            setReleaseTxId(prev => ({ ...prev, [milestoneDbId]: txId || 'oracle-approved' }))
-            if (onTransaction) {
-                onTransaction(amountBch, txId, 'release')
+            // releaseMilestoneFunds() returns:
+            //   string  — real tx.txid from a successful CashScript broadcast
+            //   null    — DB-only release (legacy project with no on-chain contract data)
+            const realTxId = txId || null
+            setReleaseTxId(prev => ({ ...prev, [milestoneDbId]: realTxId }))
+            if (onTransaction && realTxId) {
+                onTransaction(amountBch, realTxId, 'release')
             }
             refreshState()
         } catch (e) {
@@ -366,9 +370,14 @@ export default function GovernancePanel({
                                         </>
                                     )}
 
-                                    {txId && (
+                                    {txId && txId !== 'oracle-approved' && (
                                         <div className="mt-2 text-center">
-                                            <a href={chipnetExplorerUrl(txId)} target="_blank" rel="noreferrer" className="text-emerald-400 text-xs underline">
+                                            <a
+                                                href={`https://chipnet.imaginary.cash/tx/${txId}`}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                className="text-emerald-400 text-xs underline"
+                                            >
                                                 View Release on Explorer ↗
                                             </a>
                                         </div>

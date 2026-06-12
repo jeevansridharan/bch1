@@ -31,7 +31,7 @@
  */
 
 import { Contract, ElectrumNetworkProvider } from 'cashscript';
-import { binToHex }                           from '@bitauth/libauth';
+import { binToHex, secp256k1 }               from '@bitauth/libauth';
 import artifact                               from '../contracts/MilestoneEscrow.json' assert { type: 'json' };
 
 // ── Chipnet block explorer base URL (for human-readable logs) ─────────────────
@@ -64,6 +64,32 @@ function ensureUint8Array(value, label) {
         return bytes;
     }
     throw new TypeError(`[deployContract] ${label}: expected Uint8Array or hex string, got ${typeof value}`);
+}
+
+/**
+ * compressPubKeyIfNeeded
+ *
+ * Compress an uncompressed public key (65 bytes, starts with 0x04) to 33 bytes.
+ * If already compressed (33 bytes, starts with 0x02 or 0x03), returns as-is.
+ *
+ * @param {Uint8Array} pk
+ * @param {string}     label
+ * @returns {Uint8Array} compressed 33-byte pubkey
+ */
+function compressPubKeyIfNeeded(pk, label) {
+    if (pk.length === 33 && (pk[0] === 0x02 || pk[0] === 0x03)) {
+        // Already compressed
+        return pk;
+    }
+    if (pk.length === 65 && pk[0] === 0x04) {
+        // Uncompressed — compress it
+        const compressed = secp256k1.compressPublicKey(pk);
+        console.log(`[deployContract] ${label}: compressed 65-byte pubkey to 33 bytes`);
+        return compressed;
+    }
+    throw new Error(
+        `[deployContract] ${label}: expected 33-byte compressed or 65-byte uncompressed pubkey, got ${pk.length} bytes (first: 0x${pk[0].toString(16).padStart(2, '0')})`
+    );
 }
 
 /**
@@ -142,10 +168,15 @@ export async function deployMilestoneEscrow(params) {
     const oraclePkBytes    = ensureUint8Array(oraclePk,    'oraclePk');
     const milestoneIdBytes = ensureUint8Array(milestoneId, 'milestoneId');
 
-    // ── Step 2: Validate all byte lengths and pubkey prefixes ─────────────────
-    validateCompressedPubKey(creatorPkBytes,  'creatorPk');
-    validateCompressedPubKey(funderPkBytes,   'funderPk');
-    validateCompressedPubKey(oraclePkBytes,   'oraclePk');
+    // ── Step 2: Compress pubkeys if uncompressed (65 bytes) ────────────────────
+    const creatorPkCompressed = compressPubKeyIfNeeded(creatorPkBytes, 'creatorPk');
+    const funderPkCompressed  = compressPubKeyIfNeeded(funderPkBytes,  'funderPk');
+    const oraclePkCompressed  = compressPubKeyIfNeeded(oraclePkBytes,  'oraclePk');
+
+    // ── Step 3: Validate all byte lengths and pubkey prefixes ─────────────────
+    validateCompressedPubKey(creatorPkCompressed, 'creatorPk');
+    validateCompressedPubKey(funderPkCompressed,  'funderPk');
+    validateCompressedPubKey(oraclePkCompressed,  'oraclePk');
     validateMilestoneId(milestoneIdBytes);
 
     // deadline must be a non-negative integer
@@ -181,11 +212,11 @@ export async function deployMilestoneEscrow(params) {
     const contract = new Contract(
         artifact,
         [
-            creatorPkBytes,    // pubkey  → Uint8Array
-            funderPkBytes,     // pubkey  → Uint8Array
-            oraclePkBytes,     // pubkey  → Uint8Array  (tallyOraclePk)
-            milestoneIdBytes,  // bytes32 → Uint8Array
-            deadlineBigInt,    // int     → bigint
+            creatorPkCompressed, // pubkey  → Uint8Array
+            funderPkCompressed,  // pubkey  → Uint8Array
+            oraclePkCompressed,  // pubkey  → Uint8Array  (tallyOraclePk)
+            milestoneIdBytes,    // bytes32 → Uint8Array
+            deadlineBigInt,      // int     → bigint
         ],
         { provider }
     );
@@ -208,9 +239,9 @@ export async function deployMilestoneEscrow(params) {
     console.log('  Explorer     :', `${CHIPNET_EXPLORER}/${address}`);
     console.log('  Bytecode size:', contract.bytesize, 'bytes /', contract.opcount, 'opcodes');
     console.log('  Params ──────────────────────────────────────');
-    console.log('  creatorPk   :', creatorPkHex);
-    console.log('  funderPk    :', binToHex(funderPkBytes));
-    console.log('  oraclePk    :', oraclePkHex);
+    console.log('  creatorPk   :', binToHex(creatorPkCompressed));
+    console.log('  funderPk    :', binToHex(funderPkCompressed));
+    console.log('  oraclePk    :', binToHex(oraclePkCompressed));
     console.log('  milestoneId :', milestoneIdHex);
     console.log('  deadline    :', deadlineBigInt.toString(), 'blocks');
     console.groupEnd();

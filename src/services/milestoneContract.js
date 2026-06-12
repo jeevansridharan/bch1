@@ -174,14 +174,20 @@ export async function releaseMilestoneFunds(
     }
 
     // contractAddress + milestoneIdHex are needed for the CashScript broadcast,
-    // but NOT for the Oracle vote-check. Old projects (created before on-chain
-    // metadata was saved) can still get oracle approval and a DB status update.
+    // but NOT for the Oracle vote-check. If they weren't passed as props,
+    // STEP 3a will load them from the Supabase contracts table.
     const hasContractData = !!(contractAddress && milestoneIdHex)
 
+    // Local rebindable copies — STEP 3a may overwrite these from the DB
+    let contractAddr   = contractAddress
+    let milIdHex       = milestoneIdHex
+    let deadlineValue  = deadline
+
     console.log(`[milestoneContract] ── Starting Oracle Release ────────────────`)
-    console.log(`[milestoneContract]   Contract : ${contractAddress}`)
+    console.log(`[milestoneContract]   Contract : ${contractAddr}`)
     console.log(`[milestoneContract]   Milestone: ${milestoneId}`)
     console.log(`[milestoneContract]   Project  : ${projectId}`)
+
 
     // ── STEP 1: Request oracle signature from the backend ─────────────────────
     const oracleSignUrl = `${ORACLE_URL}/api/oracle/sign`
@@ -223,18 +229,93 @@ export async function releaseMilestoneFunds(
     const { signature: signatureHex, oraclePubkey: oraclePubkeyHex, proofHex } = oracleResponse
     console.log('[milestoneContract] ✓ Oracle approved!')
 
-    // ── STEP 3a: If no on-chain contract data, do a DB-only release ───────────
-    // This handles projects created before the on-chain metadata feature was added.
+    // ── STEP 3a: If no on-chain contract data was passed as props, try loading
+    // it from the Supabase contracts table (stored when the project was created).
     if (!hasContractData) {
-        console.warn('[milestoneContract] ⚠ No contract metadata — recording DB-only release.')
+        console.log('[milestoneContract] Props missing contract data — querying Supabase contracts table…')
         try {
-            const { updateMilestoneStatus } = await import('../lib/db/milestones')
-            await updateMilestoneStatus(milestoneId, 'released')
-            console.log('[milestoneContract] ✓ Milestone status → "released" in Supabase')
-        } catch (dbErr) {
-            console.error('[milestoneContract] ⚠ DB update failed:', dbErr.message)
+            const { loadContractMetadata } = await import('../lib/db/contracts')
+            const meta = await loadContractMetadata(projectId)
+
+            if (meta) {
+                // Re-assign the rebindable let vars so STEP 3b uses the DB values
+                contractAddr  = meta.contract_address
+                milIdHex      = meta.milestone_id_hex
+                deadlineValue = Number(meta.deadline)
+
+                // Re-check — we now have everything we need
+                if (contractAddr && milIdHex) {
+                    console.log('[milestoneContract] ✓ Contract metadata loaded from DB:', contractAddr)
+                    // Fall through into STEP 3b below
+                } else {
+                    throw new Error('contracts row exists but is missing address or milestoneIdHex')
+                }
+            } else {
+                // No row in the contracts table — auto-reconstruct from available data
+                // and register it so future releases don't hit this path again.
+                console.warn('[milestoneContract] ⚠ No contract row — auto-registering from current wallet keys…')
+
+                const { Contract, ElectrumNetworkProvider } = await import('cashscript')
+                const { hexToBin, binToHex, utf8ToBin, instantiateSha256 } = await import('@bitauth/libauth')
+
+                if (!wallet.publicKey) throw new Error('Cannot auto-register: wallet public key missing.')
+
+                const walletPkHex = typeof wallet.publicKey === 'string'
+                    ? wallet.publicKey
+                    : binToHex(wallet.publicKey)
+
+                // Oracle pubkey comes from the oracle response we just received
+                const oraclePkHex = oraclePubkeyHex
+
+                // Derive a deterministic milestoneId from projectId + milestoneId UUID
+                const sha256 = await instantiateSha256()
+                const derivedMilId = sha256.hash(utf8ToBin(projectId + milestoneId))
+                const derivedMilIdHex = binToHex(derivedMilId)
+                const FALLBACK_DEADLINE = 2000000  // far-future block height
+
+                // Reconstruct the contract address deterministically
+                const provider = new ElectrumNetworkProvider('chipnet')
+                const reconstructed = new Contract(
+                    artifact,
+                    [
+                        hexToBin(walletPkHex),   // creatorPk
+                        hexToBin(walletPkHex),   // funderPk (creator == funder)
+                        hexToBin(oraclePkHex),   // tallyOraclePk
+                        derivedMilId,            // milestoneId (32 bytes)
+                        BigInt(FALLBACK_DEADLINE),
+                    ],
+                    { provider },
+                )
+
+                // Persist to Supabase so the next release skips this path
+                try {
+                    const { saveContractMetadata } = await import('../lib/db/contracts')
+                    await saveContractMetadata({
+                        projectId,
+                        contractAddress:  reconstructed.address,
+                        creatorPubkey:    walletPkHex,
+                        funderPubkey:     walletPkHex,
+                        oraclePubkey:     oraclePkHex,
+                        milestoneIdHex:   derivedMilIdHex,
+                        deadline:         FALLBACK_DEADLINE,
+                    })
+                    console.log('[milestoneContract] Auto-registered contract metadata for project:', projectId)
+                } catch (saveErr) {
+                    // Non-fatal — we still have the in-memory values to continue
+                    console.warn('[milestoneContract] ⚠ Auto-register save failed (continuing):', saveErr.message)
+                }
+
+                // Assign rebindable vars so STEP 3b uses these values
+                contractAddr  = reconstructed.address
+                milIdHex      = derivedMilIdHex
+                deadlineValue = FALLBACK_DEADLINE
+                console.log('[milestoneContract] ✓ Auto-registered contract address:', contractAddr)
+            }
+
+        } catch (metaErr) {
+            console.error('[milestoneContract] ✗ Failed to load contract metadata:', metaErr.message)
+            throw new Error(`Cannot release: ${metaErr.message}`)
         }
-        return 'oracle-approved'
     }
 
     // ── STEP 3b: Build & broadcast CashScript release() transaction ───────────
@@ -253,11 +334,11 @@ export async function releaseMilestoneFunds(
         const funderPk = creatorPk  // Creator == Funder in current flow
         const oraclePk = hexToBin(oraclePubkeyHex)
 
-        // Normalise milestoneId to 32 bytes (64 hex chars)
-        let idHex = milestoneIdHex.replace('0x', '')
+        // Normalise milestoneId to 32 bytes (64 hex chars) — use milIdHex (may come from DB)
+        let idHex = milIdHex.replace('0x', '')
         if (idHex.length < 64) idHex = idHex.padEnd(64, '0')
         const milIdBytes = hexToBin(idHex)
-        const dlInt = BigInt(deadline)
+        const dlInt = BigInt(deadlineValue)
 
         const contract = new Contract(
             artifact,
@@ -265,11 +346,11 @@ export async function releaseMilestoneFunds(
             { provider },
         )
 
-        if (contract.address !== contractAddress) {
+        if (contract.address !== contractAddr) {
             console.warn(
                 `[milestoneContract] ⚠ Address mismatch!\n` +
                 `  Derived : ${contract.address}\n` +
-                `  Expected: ${contractAddress}`
+                `  Expected: ${contractAddr}`
             )
         }
 

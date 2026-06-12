@@ -40,6 +40,7 @@ import { supabase, supabaseConfigured } from '../lib/supabase'
 import { createProject, deleteProject, updateRaisedAmount } from '../lib/db/projects'
 import { insertTransaction } from '../lib/db/transactions'
 import { createMilestoneBatch } from '../lib/db/milestones'
+import { saveContractMetadata } from '../lib/db/contracts'
 import { voteOnMilestone, hasUserVoted } from '../lib/db/votes'
 import ProjectCard from '../components/ProjectCard'
 import ProjectForm from '../components/ProjectForm'
@@ -170,6 +171,8 @@ export default function ProjectsPage() {
 
         // ── 4. Deploy Contract ────────────────────────────────────────────────
         let contractAddress = '';
+        let milestoneIdHexFinal = '';
+        let deploymentParams = null;  // saved after we have the project UUID
         try {
             const deployment = await deployMilestoneEscrow({
                 creatorPk,
@@ -179,6 +182,17 @@ export default function ProjectsPage() {
                 deadlineHeight: deadline
             });
             contractAddress = deployment.address;
+            milestoneIdHexFinal = deployment.milestoneIdHex;
+            // Stash params so we can persist them to the contracts table once
+            // Supabase gives us the project UUID.
+            deploymentParams = {
+                contractAddress: deployment.address,
+                milestoneIdHex:  deployment.milestoneIdHex,
+                creatorPubkey:   wallet?.publicKey ?? '',
+                funderPubkey:    wallet?.publicKey ?? '',
+                oraclePubkey:    PLATFORM_ORACLE_PK_HEX,
+                deadline,
+            };
             console.log('[ProjectsPage] ✓ Contract Deployed:', contractAddress);
         } catch (deployErr) {
             console.error('[ProjectsPage] ✗ Deployment failed:', deployErr);
@@ -195,7 +209,7 @@ export default function ProjectsPage() {
 
         // ── 6. Build description with on-chain metadata (fallback storage) ────
         // This safely embeds the contract address and params even if the DB column is missing.
-        const milestoneIdHex = libauth.binToHex(milestoneId);
+        const milestoneIdHex = milestoneIdHexFinal || libauth.binToHex(milestoneId);
         const metaTags = contractAddress
             ? `\n\n[On-Chain Address: ${contractAddress}]\n[Milestone ID: ${milestoneIdHex}]\n[Deadline: ${deadline}]`
             : '';
@@ -207,7 +221,6 @@ export default function ProjectsPage() {
             description: fullDescription,
             goal_amount: projectData.goal_amount,
             owner_wallet: wallet?.cashaddr ?? projectData.owner_wallet ?? PLACEHOLDER_WALLET,
-            contract_address: contractAddress,
             status: 'active',
         })
 
@@ -217,6 +230,28 @@ export default function ProjectsPage() {
         }
 
         console.log('[ProjectsPage] handleProjectCreate: ✓ project inserted:', newProject)
+
+        // ── 8. Save contract metadata to Supabase contracts table ─────────────
+        // Now that we have the real project UUID from Supabase, persist all the
+        // CashScript constructor params so releaseMilestoneFunds() can load and
+        // reconstruct the Contract instance without relying on prop-drilling.
+        if (deploymentParams && newProject?.id) {
+            try {
+                await saveContractMetadata({
+                    projectId:       newProject.id,
+                    contractAddress: deploymentParams.contractAddress,
+                    creatorPubkey:   deploymentParams.creatorPubkey,
+                    funderPubkey:    deploymentParams.funderPubkey,
+                    oraclePubkey:    deploymentParams.oraclePubkey,
+                    milestoneIdHex:  deploymentParams.milestoneIdHex,
+                    deadline:        deploymentParams.deadline,
+                })
+                console.log('[ProjectsPage] ✓ Contract metadata saved to Supabase contracts table')
+            } catch (contractSaveErr) {
+                // Non-fatal — contract is deployed on-chain; metadata can be re-saved manually
+                console.error('[ProjectsPage] ⚠ Failed to save contract metadata:', contractSaveErr.message)
+            }
+        }
 
         // ── BUG FIX: Save milestones to Supabase ──────────────────────────────
         // Previously milestones were only kept in local state with fake IDs,

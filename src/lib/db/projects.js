@@ -119,6 +119,10 @@ export async function testInsertProject() {
 /**
  * Insert a new project into Supabase.
  *
+ * Note: Contract metadata (address, pubkeys) is stored in the separate `contracts`
+ * table after the project is inserted and we have its UUID. Use saveContractMetadata()
+ * from db/contracts.js to store contract details.
+ *
  * @param {Object} projectData
  * @param {string} projectData.title         - Project name (required)
  * @param {string} [projectData.description] - What the project does
@@ -136,13 +140,24 @@ export async function testInsertProject() {
  *     goal_amount:  0.05,
  *     owner_wallet: 'bchtest:...',
  *   })
+ *   if (data) {
+ *     // Now save contract metadata to the contracts table:
+ *     await saveContractMetadata({
+ *       projectId: data.id,
+ *       contractAddress: '...',
+ *       creatorPubkey: '...',
+ *       funderPubkey: '...',
+ *       oraclePubkey: '...',
+ *       milestoneIdHex: '...',
+ *       deadline: ...
+ *     })
+ *   }
  */
 export async function createProject({
     title,
     description = '',
     goal_amount,
     owner_wallet,
-    contract_address = '',
     status = 'active',
 }) {
 
@@ -174,9 +189,9 @@ export async function createProject({
         goal_amount: Number(goal_amount),
         raised_amount: 0,              // always starts at 0
         owner_wallet: owner_wallet.trim(),
-        contract_address: contract_address,
         status,
         // created_at is auto-set by Supabase DEFAULT now()
+        // contract_address and pubkeys are stored in the separate 'contracts' table
     }
 
     console.log('[createProject] ▶ About to insert payload:', payload)
@@ -195,25 +210,6 @@ export async function createProject({
 
         if (error) {
             console.error('[createProject] ✗ Supabase INSERT error:', error.code, error.message)
-
-            // ── FALLBACK: If column contract_address is missing ─────────────
-            // Error codes: 42703 (Postgres) or PGRST204 (PostgREST schema cache)
-            if ((error.code === '42703' || error.code === 'PGRST204') && payload.contract_address) {
-                console.warn('[createProject] Column "contract_address" missing. Appending to description and retrying...')
-
-                const { contract_address, ...fallbackPayload } = payload
-                // Append contract info to description so it's not lost
-                const contractTag = `\n\n[On-Chain Address: ${contract_address}]`
-                fallbackPayload.description = (fallbackPayload.description + contractTag).trim()
-
-                const retry = await supabase.from(TABLE).insert([fallbackPayload]).select().single()
-                if (!retry.error) {
-                    console.info('[createProject] ✓ Fallback insert succeeded!')
-                    return retry
-                }
-                console.error('[createProject] ✗ Fallback also failed:', retry.error.message)
-            }
-
             return { data: null, error }
         }
 
