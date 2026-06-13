@@ -260,6 +260,7 @@ export default function Dashboard({ project: initialProject, onFund, onVote, onT
             {/* ── Wallet Panel ───────────────────────────────────── */}
             <WalletPanel
                 onRealFund={handleFundComplete}
+                contractAddress={contract_address}
             />
 
             {/* ── Governance + Milestone Locking Panel ──────────────── */}

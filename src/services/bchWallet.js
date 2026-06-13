@@ -171,12 +171,22 @@ export async function getTokenBalance(wallet) {
 // ─── Funding Logic ───────────────────────────────────────────────────────────
 
 /**
- * fundProject(wallet, amountBch)
+ * fundProject(wallet, amountBch, contractAddress?)
  *
- * Broadcasts a transaction to the project address.
+ * Broadcasts a transaction to the project escrow contract address.
+ * If contractAddress is omitted, falls back to the static PROJECT_ADDRESS
+ * (legacy behaviour for projects without on-chain contracts).
+ *
+ * @param {object} wallet          — Connected mainnet-js wallet
+ * @param {number} amountBch       — Amount in BCH to send
+ * @param {string} [contractAddress] — Optional: CashScript P2SH32 contract address
  */
-export async function fundProject(wallet, amountBch) {
-    console.log(`[bchWallet] Initiating funding: ${amountBch} BCH -> ${PROJECT_ADDRESS}`)
+export async function fundProject(wallet, amountBch, contractAddress = null) {
+    const destination = contractAddress || PROJECT_ADDRESS
+    console.log(`[bchWallet] Initiating funding: ${amountBch} BCH -> ${destination}`)
+    if (contractAddress) {
+        console.log('[bchWallet] Sending to CashScript escrow contract (not the static PROJECT_ADDRESS)')
+    }
 
     try {
         // Convert BCH to satoshis (BigInt) for v3 API
@@ -184,7 +194,7 @@ export async function fundProject(wallet, amountBch) {
 
         const result = await wallet.send([
             {
-                cashaddr: PROJECT_ADDRESS,
+                cashaddr: destination,
                 value: satoshis,
                 unit: 'sat',
             }

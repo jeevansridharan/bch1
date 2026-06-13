@@ -374,6 +374,19 @@ export async function releaseMilestoneFunds(
             { provider },
         )
 
+        // ── Diagnostic: verify artifact and contract instance ─────────────────
+        console.log('[milestoneContract] Artifact:', artifact?.contractName, artifact?.bytecode ? 'OK' : 'MISSING bytecode')
+        console.log('[milestoneContract] Contract instance:', contract)
+        console.log('[milestoneContract] Contract.unlock:', contract?.unlock)
+
+        // cashscript v0.12.x: functions are on contract.unlock.<name>(), NOT contract.functions.<name>()
+        if (!contract || !contract.unlock || typeof contract.unlock.release !== 'function') {
+            throw new Error(
+                `Contract reconstruction failed — unlock.release is not a function. ` +
+                `Instance: ${JSON.stringify({ address: contract?.address, unlockKeys: Object.keys(contract?.unlock ?? {}) })}`
+            )
+        }
+
         if (contract.address !== contractAddr) {
             console.warn(
                 `[milestoneContract] ⚠ Address mismatch!\n` +
@@ -400,9 +413,29 @@ export async function releaseMilestoneFunds(
         console.log(`[milestoneContract]   Release amount: ${releaseAmount} sat`)
         console.log(`[milestoneContract]   Recipient     : ${wallet.cashaddr}`)
 
-        // CashScript requires calling functions via contract.functions.<name>()
-        const tx = await contract.functions.release(creatorSigTemplate, oracleSigBytes, proofBytes)
-            .to(wallet.cashaddr, releaseAmount)
+        // ── cashscript v0.12.1 Transaction API ───────────────────────────────
+        // v0.10 style (REMOVED):   contract.functions.release(...).to(...).send()
+        // v0.12.1 correct API:
+        //   1. Get contract UTXOs  →  contract.getUtxos()
+        //   2. Build unlocker      →  contract.unlock.release(...)
+        //   3. Wire + broadcast    →  TransactionBuilder.addInputs(utxos, unlocker).addOutput(...).send()
+        const { TransactionBuilder } = await import('cashscript')
+
+        const utxos = await contract.getUtxos()
+        if (!utxos || utxos.length === 0) {
+            throw new Error(
+                `No UTXOs found at contract address ${contract.address}. ` +
+                `The contract may not be funded, or the address was reconstructed incorrectly.`
+            )
+        }
+        console.log(`[milestoneContract]   Contract UTXOs: ${utxos.length} (total: ${utxos.reduce((s, u) => s + u.satoshis, 0n)} sat)`)
+
+        // Build the unlocker for the release() function
+        const releaseUnlocker = contract.unlock.release(creatorSigTemplate, oracleSigBytes, proofBytes)
+
+        const tx = await new TransactionBuilder({ provider })
+            .addInputs(utxos, releaseUnlocker)
+            .addOutput({ to: wallet.cashaddr, amount: releaseAmount })
             .send()
 
         console.log(`[milestoneContract] ✓ Funds Released! TX ID: ${tx.txid}`)

@@ -27,7 +27,7 @@ function Spinner() {
     )
 }
 
-export default function WalletPanel({ onRealFund, onWalletConnect }) {
+export default function WalletPanel({ onRealFund, onWalletConnect, contractAddress = null }) {
     const {
         wallet,
         address,
@@ -90,7 +90,7 @@ export default function WalletPanel({ onRealFund, onWalletConnect }) {
         setTxId('')
 
         try {
-            const hash = await fundProject(wallet, parsed)
+            const hash = await fundProject(wallet, parsed, contractAddress)
             setTxId(hash)
             setTxStatus('success')
             if (onRealFund) onRealFund(parsed, hash)
