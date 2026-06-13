@@ -225,28 +225,57 @@ app.post('/api/oracle/sign', async (req, res) => {
         console.log(`[Oracle] ✓ Governance passed (${(approvalRate * 100).toFixed(1)}% YES). Signing…`)
 
         // ── 5f. Build the proof message ──────────────────────────────────────
-        // Message = milestoneId (padded to 32 bytes) || 0x01 (approved status byte)
+        // Message = milestoneId_bytes32 (32 bytes) || 0x01 (approved status byte)
         // This matches what MilestoneEscrow.cash verifies:
         //   require(tallyProof == milestoneId + 0x01);
         //   require(checkDataSig(oracleSig, tallyProof, tallyOraclePk));
-        let idHex = milestoneId.replace('0x', '').replace(/-/g, '') // strip UUID dashes if present
-        if (idHex.length < 64) {
-            // UUID hex (32 chars) → pad to 64 chars (32 bytes)
-            idHex = idHex.padEnd(64, '0')
-        } else if (idHex.length > 64) {
-            idHex = idHex.slice(0, 64)
+        //
+        // IMPORTANT: The contract's `milestoneId` constructor param is the
+        // 32-byte SHA-256 hash stored in the `contracts` table as `milestone_id_hex`
+        // (64 hex chars). It is NOT the Supabase UUID string.
+        //
+        // The frontend must send `milestoneIdHex` (the 64-char hex from the DB)
+        // alongside the UUID `milestoneId`. We use milestoneIdHex if present.
+        const { milestoneIdHex } = req.body  // preferred: 64-char hex from contracts table
+
+        let idHex
+        if (milestoneIdHex && /^[0-9a-fA-F]{64}$/.test(milestoneIdHex)) {
+            // ✓ Caller sent the real 32-byte contract milestoneId as hex — use directly
+            idHex = milestoneIdHex.toLowerCase()
+            console.log('[Oracle] ✓ Using milestoneIdHex from request (64-char hex):', idHex.slice(0, 20) + '…')
+        } else {
+            // ⚠ Fallback: derive from UUID — WARNING: this may differ from the
+            // contract's constructor param and cause checkDataSig to fail on-chain!
+            console.warn('[Oracle] ⚠ milestoneIdHex not provided — falling back to UUID-based derivation.')
+            console.warn('[Oracle]   Frontend should send milestoneIdHex from the contracts table.')
+            let rawHex = milestoneId.replace('0x', '').replace(/-/g, '') // strip UUID dashes
+            if (rawHex.length < 64) {
+                rawHex = rawHex.padEnd(64, '0')
+            } else if (rawHex.length > 64) {
+                rawHex = rawHex.slice(0, 64)
+            }
+            idHex = rawHex
         }
 
-        // proofMessage = milestoneId_bytes32 || 0x01
-        const proofHex     = idHex + '01'
-        const proofBytes   = libauth.hexToBin(proofHex)
+        // ── Build tallyProof as raw bytes: milestoneId (32 bytes) + 0x01 ──────
+        const milIdBytes  = libauth.hexToBin(idHex)           // exactly 32 bytes
+        const tallyProof  = new Uint8Array([...milIdBytes, 0x01])  // 33 bytes total
+        const proofHex    = idHex + '01'                      // hex for the response body
 
-        // CashScript's checkDataSig opcode hashes the message with SHA256 before
-        // verifying the Schnorr signature. So we sign SHA256(proofBytes).
-        const sha256      = await libauth.instantiateSha256()
-        const messageHash = sha256.hash(proofBytes)
+        // ── Sign SHA256d(tallyProof) — BCH OP_CHECKDATASIG double-hashes ──────
+        // BCH's checkDataSig opcode verifies:
+        //   Schnorr.verify(oracleSig, SHA256(SHA256(tallyProof)), tallyOraclePk)
+        //
+        // Single SHA256 (old code) caused the on-chain verification to fail.
+        // We must sign SHA256d = SHA256(SHA256(tallyProof)) here.
+        const sha256Inst  = await libauth.instantiateSha256()
+        const firstHash   = sha256Inst.hash(tallyProof)       // SHA256(tallyProof)
+        const messageHash = sha256Inst.hash(firstHash)        // SHA256(SHA256(tallyProof)) = SHA256d
 
-        // ── 5g. Sign with oracle private key (Schnorr — required for datasig) ──
+        console.log('[Oracle] tallyProof length  :', tallyProof.length, 'bytes (expected 33)')
+        console.log('[Oracle] messageHash (SHA256d):', libauth.binToHex(messageHash).slice(0, 20) + '…')
+
+        // ── Sign with oracle private key (Schnorr — required for datasig) ──────
         const secp      = await libauth.instantiateSecp256k1()
         const signature = secp.signMessageHashSchnorr(oraclePrivateKey, messageHash)
 
@@ -260,6 +289,7 @@ app.post('/api/oracle/sign', async (req, res) => {
 
         console.log('[Oracle] ✓ Signature generated:', signatureHex.slice(0, 20) + '…')
         console.log('[Oracle] ✓ Proof hex          :', proofHex.slice(0, 20) + '…')
+
 
         // ── 5h. Return success response ──────────────────────────────────────
         return res.json({

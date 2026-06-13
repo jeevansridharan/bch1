@@ -190,6 +190,21 @@ export async function releaseMilestoneFunds(
 
 
     // ── STEP 1: Request oracle signature from the backend ─────────────────────
+    // If milIdHex is not yet available from props, load it from the DB NOW
+    // so we can pass it to the oracle. Both sides must sign/verify the SAME bytes.
+    if (!milIdHex) {
+        try {
+            const { loadContractMetadata } = await import('../lib/db/contracts')
+            const meta = await loadContractMetadata(projectId)
+            if (meta?.milestone_id_hex) {
+                milIdHex = meta.milestone_id_hex
+                console.log('[milestoneContract] ✓ Pre-loaded milIdHex from DB for oracle call:', milIdHex.slice(0, 20) + '…')
+            }
+        } catch (preloadErr) {
+            console.warn('[milestoneContract] Could not pre-load milIdHex before oracle call:', preloadErr.message)
+        }
+    }
+
     const oracleSignUrl = `${ORACLE_URL}/api/oracle/sign`
     console.log('[milestoneContract] ▶ Calling Oracle backend…', oracleSignUrl)
 
@@ -198,7 +213,11 @@ export async function releaseMilestoneFunds(
         const response = await fetch(oracleSignUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ milestoneId, projectId }),
+            body: JSON.stringify({
+                milestoneId,       // Supabase UUID (for vote tally lookup)
+                projectId,
+                milestoneIdHex: milIdHex ?? undefined,  // 64-char SHA-256 hex (for proof construction)
+            }),
         })
 
         oracleResponse = await response.json()
@@ -218,6 +237,7 @@ export async function releaseMilestoneFunds(
         }
         throw fetchErr
     }
+
 
     console.log('[milestoneContract] Oracle response:', oracleResponse)
 
@@ -396,7 +416,51 @@ export async function releaseMilestoneFunds(
         }
 
         const oracleSigBytes = hexToBin(signatureHex)
-        const proofBytes = hexToBin(proofHex)
+
+        // ── Build tallyProof to match EXACTLY what the contract checks ─────────
+        // MilestoneEscrow.cash line 26:
+        //   require(tallyProof == milestoneId + 0x01);
+        //
+        // The contract's constructor param `milestoneId` is the 32-byte SHA-256
+        // hash stored in `milIdHex` (loaded from the contracts table).
+        //
+        // The oracle's proofHex is built from the Supabase UUID, which is a
+        // DIFFERENT value — it would fail the contract's equality check.
+        //
+        // We must build tallyProof here from the EXACT same milIdHex used to
+        // construct the Contract instance above, then 0x01 appended:
+        //   tallyProof = milestoneId_bytes (32) || 0x01 (1) = 33 bytes total
+        //
+        // The oracle signed SHA256(proofHex_from_uuid), but the contract verifies
+        // checkDataSig(oracleSig, tallyProof, tallyOraclePk) which internally
+        // does SHA256(tallyProof). For this to pass, the oracle MUST sign the
+        // same bytes we pass here. So we rebuild both to use milIdHex consistently.
+        const contractMilIdHex = idHex  // the normalised 64-char hex from line ~364
+        const contractMilIdBytes = milIdBytes  // the 32-byte Uint8Array already computed above
+
+        // tallyProof = milestoneId (32 bytes) + 0x01 (approved status byte)
+        const tallyProof = new Uint8Array([...contractMilIdBytes, 0x01])
+        const tallyProofHex = contractMilIdHex + '01'
+
+        console.log('[milestoneContract] tallyProof (hex):', tallyProofHex.slice(0, 20) + '…')
+        console.log('[milestoneContract] tallyProof length:', tallyProof.length, 'bytes (expected 33)')
+
+        // ── Verify the oracle signature is valid over our tallyProof ──────────
+        // If the oracle signed a different message (UUID-based proof), the
+        // datasig check will still fail on-chain. Log a warning so it's visible.
+        const oracleProofHexFromServer = proofHex ?? ''
+        if (oracleProofHexFromServer.toLowerCase() !== tallyProofHex.toLowerCase()) {
+            console.warn(
+                '[milestoneContract] ⚠ Oracle proofHex differs from contract milestoneId!\n' +
+                `  Oracle proof  : ${oracleProofHexFromServer.slice(0, 20)}…\n` +
+                `  Contract proof: ${tallyProofHex.slice(0, 20)}…\n` +
+                '  The oracle must sign SHA256(milIdHex + 01). Check backend/server.js proof construction.'
+            )
+        }
+
+        // Build the unlocker for the release() function
+        // Arg order matches MilestoneEscrow.cash release() signature exactly:
+        //   release(sig creatorSig, datasig oracleSig, bytes tallyProof)
 
         if (!wallet.privateKeyWif) {
             throw new Error(
@@ -414,11 +478,9 @@ export async function releaseMilestoneFunds(
         console.log(`[milestoneContract]   Recipient     : ${wallet.cashaddr}`)
 
         // ── cashscript v0.12.1 Transaction API ───────────────────────────────
-        // v0.10 style (REMOVED):   contract.functions.release(...).to(...).send()
-        // v0.12.1 correct API:
-        //   1. Get contract UTXOs  →  contract.getUtxos()
-        //   2. Build unlocker      →  contract.unlock.release(...)
-        //   3. Wire + broadcast    →  TransactionBuilder.addInputs(utxos, unlocker).addOutput(...).send()
+        // 1. Get contract UTXOs  →  contract.getUtxos()
+        // 2. Build unlocker      →  contract.unlock.release(...)
+        // 3. Wire + broadcast    →  TransactionBuilder.addInputs(utxos, unlocker).addOutput(...).send()
         const { TransactionBuilder } = await import('cashscript')
 
         const utxos = await contract.getUtxos()
@@ -430,8 +492,8 @@ export async function releaseMilestoneFunds(
         }
         console.log(`[milestoneContract]   Contract UTXOs: ${utxos.length} (total: ${utxos.reduce((s, u) => s + u.satoshis, 0n)} sat)`)
 
-        // Build the unlocker for the release() function
-        const releaseUnlocker = contract.unlock.release(creatorSigTemplate, oracleSigBytes, proofBytes)
+        const releaseUnlocker = contract.unlock.release(creatorSigTemplate, oracleSigBytes, tallyProof)
+
 
         const tx = await new TransactionBuilder({ provider })
             .addInputs(utxos, releaseUnlocker)
