@@ -151,7 +151,7 @@ export async function scanVotes(projectId?: string): Promise<VoteStats> {
 
     try {
         // 1. Get this project's unique voting addresses
-        const { getProjectVotingAddresses } = await import('./govService');
+        // NOTE: Call directly — do NOT re-import './govService' (circular import bug)
         const { approveAddr, rejectAddr } = await getProjectVotingAddresses(projectId);
 
         // 2. Use cashscript ElectrumNetworkProvider — handles empty addresses correctly
@@ -168,10 +168,18 @@ export async function scanVotes(projectId?: string): Promise<VoteStats> {
             }
         };
 
-        const [yesUtxos, noUtxos] = await Promise.all([
-            safeGetUtxos(approveAddr),
-            safeGetUtxos(rejectAddr),
-        ]);
+        let yesUtxos: any[] = [];
+        let noUtxos: any[] = [];
+        try {
+            [yesUtxos, noUtxos] = await Promise.all([
+                safeGetUtxos(approveAddr),
+                safeGetUtxos(rejectAddr),
+            ]);
+        } finally {
+            // Always disconnect — prevents MaxListenersExceededWarning from
+            // the persistent WebSocket accumulating on every Dashboard refresh.
+            try { await provider.disconnect(); } catch { /* ignore */ }
+        }
 
         // 4. Sum only the GOV tokens (filter by category)
         const sumTokens = (utxos: any[]) => (utxos ?? []).reduce((acc: number, utxo: any) => {
@@ -196,3 +204,4 @@ export async function scanVotes(projectId?: string): Promise<VoteStats> {
         return { yesVotes: 0, noVotes: 0, totalVotes: 0, approvalPercentage: 0 };
     }
 }
+

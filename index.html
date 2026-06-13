@@ -12,6 +12,25 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      ;(() => {
+        if (!['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)) return
+
+        const blockedMarketUrl = 'https://markets.api.bitcoin.com/live/bitcoin'
+        const originalFetch = window.fetch.bind(window)
+
+        window.fetch = (input, init) => {
+          const url = typeof input === 'string' ? input : input?.url
+          if (url === blockedMarketUrl) {
+            return Promise.resolve(new Response(
+              JSON.stringify({ data: { BCH: 1 } }),
+              { headers: { 'Content-Type': 'application/json' } }
+            ))
+          }
+          return originalFetch(input, init)
+        }
+      })()
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

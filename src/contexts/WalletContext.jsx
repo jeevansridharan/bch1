@@ -52,13 +52,17 @@ export function WalletProvider({ children }) {
         localStorage.removeItem('milestara_chipnet_balance')
     }, [])
 
-    // Auto-connect on mount if WIF exists
+    // Auto-connect on mount if WIF exists in localStorage
+    // IMPORTANT: [] dependency array — run only ONCE on mount.
+    // Adding `wallet` or `connect` to deps would cause infinite reconnect loops
+    // because connect() sets wallet, which triggers the effect again.
     useEffect(() => {
         const storedWif = localStorage.getItem('milestara_chipnet_wif')
-        if (storedWif && !wallet) {
-            connect()
+        if (storedWif) {
+            connect(storedWif)
         }
-    }, [connect, wallet])
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
 
     // Periodic refresh
     useEffect(() => {

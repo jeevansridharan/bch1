@@ -8,6 +8,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react'
 import { fetchProjectById } from '../lib/db/projects'
+import { loadContractMetadata } from '../lib/db/contracts'
 import { Trash2, Shield, LayoutDashboard, History, CheckCircle2, Circle } from 'lucide-react'
 import { useWallet } from '../contexts/WalletContext'
 import WalletPanel from './WalletPanel'
@@ -35,6 +36,7 @@ export default function Dashboard({ project: initialProject, onFund, onVote, onT
     const [project, setProject] = useState(initialProject)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const [contractMeta, setContractMeta] = useState(null)  // row from contracts table
     const { wallet: connectedWallet } = useWallet()
     const [onChainTally, setOnChainTally] = useState({ yesVotes: 0, noVotes: 0, approvalPercentage: 0 })
 
@@ -56,7 +58,19 @@ export default function Dashboard({ project: initialProject, onFund, onVote, onT
             if (fetchError) throw fetchError
             if (data) setProject(data)
 
-            // 2. Fetch On-Chain Tally — scoped to THIS project's voting addresses
+            // 2. Fetch contract metadata (pubkeys, milestoneIdHex, deadline)
+            //    This is the authoritative source — description tags are only a fallback.
+            try {
+                const meta = await loadContractMetadata(initialProject.id)
+                if (meta) {
+                    setContractMeta(meta)
+                    console.log('[Dashboard] ✓ Contract metadata loaded from DB:', meta.contract_address)
+                }
+            } catch (metaErr) {
+                console.warn('[Dashboard] Contract metadata not available:', metaErr.message)
+            }
+
+            // 3. Fetch On-Chain Tally
             const tally = await scanVotes(initialProject.id)
             setOnChainTally(tally)
             console.log(`[Dashboard] ✓ On-Chain Tally: ${tally.yesVotes} YES / ${tally.noVotes} NO`)
@@ -148,10 +162,24 @@ export default function Dashboard({ project: initialProject, onFund, onVote, onT
             .trim()
     }
 
-    // Extraction helpers for on-chain contract data stored in description
-    const contract_address = project?.contract_address || (project?.description?.match(/\[On-Chain Address: (bchtest:[^\]]+)\]/)?.[1] || null)
-    const milestone_id_hex = project?.description?.match(/\[Milestone ID: ([^\]]+)\]/)?.[1] || null
-    const deadline_val = project?.description?.match(/\[Deadline: ([^\]]+)\]/)?.[1] || null
+    // ── Contract metadata resolution (priority order) ─────────────────────────
+    // 1st: contracts table row (most reliable — set at deploy time)
+    // 2nd: embedded tags in project description (legacy fallback)
+    // 3rd: null (auto-register will run in milestoneContract.js)
+    const contract_address = contractMeta?.contract_address
+        || project?.description?.match(/\[On-Chain Address: (bchtest:[^\]]+)\]/)?.[1]
+        || null
+    const milestone_id_hex = contractMeta?.milestone_id_hex
+        || project?.description?.match(/\[Milestone ID: ([^\]]+)\]/)?.[1]
+        || null
+    const deadline_val = contractMeta?.deadline
+        || project?.description?.match(/\[Deadline: ([^\]]+)\]/)?.[1]
+        || null
+
+    // Debug: log what's being passed to GovernancePanel
+    if (contract_address || milestone_id_hex) {
+        console.log('[Dashboard] Contract data for release:', { contract_address, milestone_id_hex, deadline_val })
+    }
 
     // ── Render Logic ──────────────────────────────────────────────────────────
 

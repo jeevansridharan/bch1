@@ -113,7 +113,7 @@ export async function castVote(wallet, projectId, milestoneId, voteType, tokensT
     if (!projectId) throw new Error('castVote: projectId is required for per-project voting')
 
     // 1. Get this project's deterministic voting addresses
-    const { getProjectVotingAddresses, GOV_TOKEN_CATEGORY_ID } = await import('./govService')
+    const { getProjectVotingAddresses } = await import('./govService')
     const { approveAddr, rejectAddr } = await getProjectVotingAddresses(projectId)
     const destination = voteType === 'yes' ? approveAddr : rejectAddr
 
@@ -372,8 +372,7 @@ export async function releaseMilestoneFunds(
         console.log(`[milestoneContract]   Release amount: ${releaseAmount} sat`)
         console.log(`[milestoneContract]   Recipient     : ${wallet.cashaddr}`)
 
-        const tx = await contract.functions
-            .release(creatorSigTemplate, oracleSigBytes, proofBytes)
+        const tx = await contract.release(creatorSigTemplate, oracleSigBytes, proofBytes)
             .to(wallet.cashaddr, releaseAmount)
             .send()
 

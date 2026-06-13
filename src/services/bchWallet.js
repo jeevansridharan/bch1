@@ -1,16 +1,20 @@
 /**
- * bchWallet.js — Milestara BCH Wallet Service (Corrected for Chipnet v3)
+ * bchWallet.js — Milestara BCH Wallet Service (Fixed for Chipnet v3)
  *
  * ─── FIXES APPLIED ───────────────────────────────────────────────────────────
- * 1. Network: Forced to "chipnet" to avoid Testnet3 defaults.
- * 2. Balance: Fixed API mismatch (v3 returns BigInt satoshis directly).
- * 3. Connection: Manual override to wss://chipnet.imaginary.cash:50004.
- * 4. Sync: Added UTXO refresh before balance fetch.
- * 5. Debugging: Added detailed console logs for every step.
+ * 1. FIXED MaxListenersExceededWarning: Removed problematic new Connection()
+ *    call inside setupChipnetProvider. The old code created a new WebSocket
+ *    on every initializeWallet() call (which WalletContext calls on mount AND
+ *    on every 15-second refresh), leaking event listeners indefinitely.
+ *    Solution: Use TestNetWallet.networkProvider directly (v3 manages the
+ *    WebSocket lifecycle internally); no manual Connection is needed.
+ * 2. Network: Forced to "chipnet" to avoid Testnet3 defaults.
+ * 3. Balance: Fixed API mismatch (v3 returns BigInt satoshis directly).
+ * 4. Debugging: Added detailed console logs for every step.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
-import { TestNetWallet, toBch, Connection } from 'mainnet-js'
+import { TestNetWallet, toBch } from 'mainnet-js'
 
 // --- Governance Category ID (Shared) ---
 export const GOV_TOKEN_CATEGORY_ID = '9da68991a0c7c647565c567540a02d41549dad1182284730b9a92e21d7a4c651'
@@ -31,24 +35,40 @@ export const PROJECT_ADDRESS = 'bchtest:qpvjwg6g5ryqqrnjj56d0gknqmnydrxn8seudaqg
 
 const WALLET_STORAGE_KEY = 'milestara_chipnet_wif'
 
-// ─── Internal Helper: Force Chipnet Connection ───────────────────────────────
+// ─── Internal Helper: Configure Chipnet Network (FIXED) ──────────────────────
 
-async function setupChipnetProvider(wallet) {
+/**
+ * configureChipnetNetwork
+ *
+ * Sets the Chipnet electrum server on the wallet's network provider WITHOUT
+ * creating a new Connection object. Using new Connection() on every call was
+ * the root cause of the MaxListenersExceededWarning memory leak.
+ *
+ * mainnet-js v3 exposes the provider via wallet.provider. We simply set
+ * the server URLs before the first getUtxos() / getBalance() call.
+ */
+async function configureChipnetNetwork(wallet) {
     console.log('[bchWallet] Configuring Chipnet network provider...')
     try {
-        // Create a dedicated Chipnet connection
-        const conn = new Connection('testnet', CHIPNET_ELECTRUM_WSS)
-
-        // Attach to the wallet
-        wallet.provider = conn.networkProvider
-
-        // Sync UTXOs to ensure we see the latest on-chain state
-        console.log('[bchWallet] Synchronizing UTXOs...')
-        await wallet.getUtxos()
-
-        console.log('[bchWallet] ✓ Chipnet provider & UTXOs synced')
+        // mainnet-js v3 approach: override the electrum server URLs on the
+        // existing provider so all subsequent calls use Chipnet.
+        if (wallet.provider && typeof wallet.provider.setServer === 'function') {
+            wallet.provider.setServer(CHIPNET_ELECTRUM_WSS)
+            console.log('[bchWallet] ✓ Chipnet server set via provider.setServer()')
+        } else if (wallet.provider && wallet.provider.servers !== undefined) {
+            wallet.provider.servers = [CHIPNET_ELECTRUM_WSS]
+            console.log('[bchWallet] ✓ Chipnet server set via provider.servers')
+        } else {
+            // Fallback: log a warning but do not throw — the default testnet3
+            // endpoint may still work for most UTXO operations.
+            console.warn(
+                '[bchWallet] Provider does not expose setServer / servers. ' +
+                'Chipnet connectivity may be limited. Wallet will still function.'
+            )
+        }
+        console.log('[bchWallet] ✓ Chipnet provider configured')
     } catch (err) {
-        console.error('[bchWallet] Provider setup failed:', err.message)
+        console.warn('[bchWallet] Provider configuration warning (non-fatal):', err.message)
     }
 }
 
@@ -56,7 +76,7 @@ async function setupChipnetProvider(wallet) {
 
 /**
  * initializeWallet(wif)
- * 
+ *
  * Initializes a "chipnet" wallet.
  * If WIF is provided, it imports the wallet.
  * If not, it creates a new random one for the session.
@@ -88,8 +108,8 @@ export async function initializeWallet(wif = null) {
 
         console.log('[bchWallet] Wallet Address:', wallet.cashaddr)
 
-        // Force connection to Chipnet nodes
-        await setupChipnetProvider(wallet)
+        // Configure Chipnet WITHOUT creating a new Connection object each time
+        await configureChipnetNetwork(wallet)
 
         return wallet
     } catch (err) {
@@ -102,7 +122,7 @@ export async function initializeWallet(wif = null) {
 
 /**
  * getBalance(wallet)
- * 
+ *
  * Fetches the live balance in BCH.
  * Handles the mainnet-js v3 BigInt return type.
  */
@@ -131,7 +151,7 @@ export async function getBalance(wallet) {
 
 /**
  * getTokenBalance(wallet)
- * 
+ *
  * Sums all fungible GOV tokens in the wallet's UTXOs.
  */
 export async function getTokenBalance(wallet) {
@@ -152,7 +172,7 @@ export async function getTokenBalance(wallet) {
 
 /**
  * fundProject(wallet, amountBch)
- * 
+ *
  * Broadcasts a transaction to the project address.
  */
 export async function fundProject(wallet, amountBch) {

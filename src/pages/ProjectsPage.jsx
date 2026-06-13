@@ -156,11 +156,28 @@ export default function ProjectsPage() {
         }
 
         // ── 2. Prepare Public Keys for Contract ──────────────────────────────
-        // Use real keys if wallet is connected, otherwise dummy but valid hex
-        const dummyPk = libauth.hexToBin('02' + '0'.repeat(64));
-        const creatorPk = wallet?.publicKey ? libauth.hexToBin(wallet.publicKey) : dummyPk;
-        const funderPk = creatorPk; // Creator is default funder
-        const oraclePk = libauth.hexToBin(PLATFORM_ORACLE_PK_HEX);
+        // CashScript requires 33-byte COMPRESSED pubkeys (0x02 or 0x03 prefix).
+        // mainnet-js / bchWallet may return:
+        //   • 33-byte hex (already compressed)  → use directly
+        //   • 65-byte hex (uncompressed, 0x04…) → compress: keep X, derive prefix from Y parity
+        const dummyPkHex = '02' + '0'.repeat(64)  // valid 33-byte placeholder
+
+        function compressPubkeyHex(hex) {
+            if (!hex) return dummyPkHex
+            const clean = hex.replace(/^0x/, '')
+            if (clean.length === 66) return clean          // already 33 bytes
+            if (clean.length !== 130 || clean.slice(0, 2) !== '04') return dummyPkHex
+            const xHex = clean.slice(2, 66)
+            const yLastByte = parseInt(clean.slice(-2), 16)
+            const prefix = yLastByte % 2 === 0 ? '02' : '03'
+            return prefix + xHex
+        }
+
+        const walletPkHex   = compressPubkeyHex(wallet?.publicKey)
+        const creatorPk     = libauth.hexToBin(walletPkHex)
+        const funderPk      = creatorPk                                        // Creator is default funder
+        const oraclePk      = libauth.hexToBin(PLATFORM_ORACLE_PK_HEX)
+
 
         // ── 3. Generate Uniq Milestone ID ─────────────────────────────────────
         const sha256 = await libauth.instantiateSha256();
@@ -188,8 +205,8 @@ export default function ProjectsPage() {
             deploymentParams = {
                 contractAddress: deployment.address,
                 milestoneIdHex:  deployment.milestoneIdHex,
-                creatorPubkey:   wallet?.publicKey ?? '',
-                funderPubkey:    wallet?.publicKey ?? '',
+                creatorPubkey:   walletPkHex,    // compressed 33-byte hex
+                funderPubkey:    walletPkHex,    // compressed 33-byte hex
                 oraclePubkey:    PLATFORM_ORACLE_PK_HEX,
                 deadline,
             };
