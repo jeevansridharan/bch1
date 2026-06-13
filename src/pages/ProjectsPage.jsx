@@ -164,7 +164,14 @@ export default function ProjectsPage() {
 
         function compressPubkeyHex(hex) {
             if (!hex) return dummyPkHex
-            const clean = hex.replace(/^0x/, '')
+            // mainnet-js wallet.publicKey returns a Uint8Array, not a string.
+            // Convert binary to hex string first if needed.
+            let hexStr = hex
+            if (hex instanceof Uint8Array || (typeof hex === 'object' && hex !== null && hex.constructor?.name === 'Buffer')) {
+                hexStr = Array.from(hex).map(b => b.toString(16).padStart(2, '0')).join('')
+            }
+            if (typeof hexStr !== 'string') return dummyPkHex
+            const clean = hexStr.replace(/^0x/, '')
             if (clean.length === 66) return clean          // already 33 bytes
             if (clean.length !== 130 || clean.slice(0, 2) !== '04') return dummyPkHex
             const xHex = clean.slice(2, 66)
