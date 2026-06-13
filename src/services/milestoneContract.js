@@ -321,18 +321,44 @@ export async function releaseMilestoneFunds(
     // ── STEP 3b: Build & broadcast CashScript release() transaction ───────────
     try {
         const { Contract, ElectrumNetworkProvider, SignatureTemplate } = await import('cashscript')
-        const { hexToBin } = await import('@bitauth/libauth')
+        const { hexToBin, binToHex } = await import('@bitauth/libauth')
 
         const provider = new ElectrumNetworkProvider('chipnet')
 
         if (!wallet.publicKey) throw new Error('Wallet public key missing. Try reconnecting.')
 
-        const creatorPk = typeof wallet.publicKey === 'string'
-            ? hexToBin(wallet.publicKey)
-            : wallet.publicKey
+        // ── Use the EXACT same pubkeys that were used at deploy time ───────────
+        // The contract address is deterministic: if any pubkey differs from the
+        // original constructor args, a different P2SH address is derived and the
+        // UTXO lookup fails. Load stored pubkeys from the DB metadata first;
+        // fall back to live wallet / oracle values only when not available.
+        let creatorPkHexStored = null
+        let funderPkHexStored  = null
+        let oraclePkHexStored  = null
+        try {
+            const { loadContractMetadata } = await import('../lib/db/contracts')
+            const meta = await loadContractMetadata(projectId)
+            if (meta) {
+                creatorPkHexStored = meta.creator_pubkey
+                funderPkHexStored  = meta.funder_pubkey
+                oraclePkHexStored  = meta.oracle_pubkey
+                console.log('[milestoneContract] ✓ Loaded stored pubkeys from DB for contract reconstruction')
+            }
+        } catch (metaLoadErr) {
+            console.warn('[milestoneContract] Could not load stored pubkeys from DB, using live values:', metaLoadErr.message)
+        }
 
-        const funderPk = creatorPk  // Creator == Funder in current flow
-        const oraclePk = hexToBin(oraclePubkeyHex)
+        // Resolve wallet pubkey to hex string (handles Uint8Array from mainnet-js)
+        const walletPkRaw = wallet.publicKey
+        const walletPkHexLive = typeof walletPkRaw === 'string'
+            ? walletPkRaw
+            : binToHex(walletPkRaw)
+
+        // Params in the exact order of the MilestoneEscrow constructor:
+        //   (creatorPk, funderPk, tallyOraclePk, milestoneId, deadline)
+        const creatorPk = hexToBin(creatorPkHexStored ?? walletPkHexLive)
+        const funderPk  = hexToBin(funderPkHexStored  ?? walletPkHexLive)
+        const oraclePk  = hexToBin(oraclePkHexStored  ?? oraclePubkeyHex)
 
         // Normalise milestoneId to 32 bytes (64 hex chars) — use milIdHex (may come from DB)
         let idHex = milIdHex.replace('0x', '')
@@ -340,6 +366,8 @@ export async function releaseMilestoneFunds(
         const milIdBytes = hexToBin(idHex)
         const dlInt = BigInt(deadlineValue)
 
+        // Constructor params order must match MilestoneEscrow.cash exactly:
+        // (creatorPk, funderPk, tallyOraclePk, milestoneId, deadline)
         const contract = new Contract(
             artifact,
             [creatorPk, funderPk, oraclePk, milIdBytes, dlInt],
@@ -372,7 +400,8 @@ export async function releaseMilestoneFunds(
         console.log(`[milestoneContract]   Release amount: ${releaseAmount} sat`)
         console.log(`[milestoneContract]   Recipient     : ${wallet.cashaddr}`)
 
-        const tx = await contract.release(creatorSigTemplate, oracleSigBytes, proofBytes)
+        // CashScript requires calling functions via contract.functions.<name>()
+        const tx = await contract.functions.release(creatorSigTemplate, oracleSigBytes, proofBytes)
             .to(wallet.cashaddr, releaseAmount)
             .send()
 
