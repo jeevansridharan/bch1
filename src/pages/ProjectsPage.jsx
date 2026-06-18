@@ -55,11 +55,33 @@ import * as libauth from '@bitauth/libauth'
 // For now we use a placeholder so the owner_wallet field is never empty.
 const PLACEHOLDER_WALLET = 'bchtest:qp0000000000000000000000000000000000000000'
 
-/** 
- * Platform Oracle Public Key (Tally Engine) 
- * In production, this would be a fixed key held by the platform backend.
+// ── Oracle Backend URL ────────────────────────────────────────────────────────
+// Must match the URL used by milestoneContract.js so both sides talk to the
+// same oracle instance.
+const ORACLE_URL = import.meta.env.VITE_ORACLE_URL || 'http://localhost:3001'
+
+/**
+ * fetchOraclePubkey
+ *
+ * Fetches the REAL oracle public key from the running oracle backend.
+ * The backend derives it from ORACLE_WIF at startup, so this is always
+ * the key that will be used for signing — unlike a hardcoded constant
+ * which drifts out of sync whenever the WIF is rotated.
+ *
+ * @returns {Promise<string>} compressed 33-byte pubkey hex
+ * @throws  if the oracle backend is unreachable or returns an error
  */
-const PLATFORM_ORACLE_PK_HEX = '02989c0b76cb563971fdc9bef31ec06c3560f3249d6ee9e5d83c57625596e05f6f'; // Real Platform Oracle Mock PubKey
+async function fetchOraclePubkey() {
+    const url = `${ORACLE_URL}/health`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`Oracle /health returned HTTP ${res.status}`)
+    const { oracle } = await res.json()
+    if (!oracle || !/^[0-9a-fA-F]{66}$/.test(oracle)) {
+        throw new Error(`Oracle /health returned invalid pubkey: ${oracle}`)
+    }
+    console.log('[ProjectsPage] ✓ Oracle pubkey fetched from backend:', oracle)
+    return oracle
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -180,10 +202,26 @@ export default function ProjectsPage() {
             return prefix + xHex
         }
 
-        const walletPkHex   = compressPubkeyHex(wallet?.publicKey)
-        const creatorPk     = libauth.hexToBin(walletPkHex)
-        const funderPk      = creatorPk                                        // Creator is default funder
-        const oraclePk      = libauth.hexToBin(PLATFORM_ORACLE_PK_HEX)
+        const walletPkHex = compressPubkeyHex(wallet?.publicKey)
+        const creatorPk   = libauth.hexToBin(walletPkHex)
+        const funderPk    = creatorPk  // Creator is default funder
+
+        // ── Fetch the LIVE oracle pubkey from the running backend ─────────────
+        // CRITICAL: the contract bakes tallyOraclePk into its bytecode. The
+        // oracle backend signs proofs with the key from ORACLE_WIF. If these
+        // two keys differ, checkDataSig() will ALWAYS fail — even if everything
+        // else is correct. We fetch from /health so they are ALWAYS in sync.
+        let oraclePubkeyHex
+        try {
+            oraclePubkeyHex = await fetchOraclePubkey()
+        } catch (oracleErr) {
+            console.error('[ProjectsPage] ✗ Cannot reach oracle backend:', oracleErr.message)
+            throw new Error(
+                `Cannot deploy contract: Oracle backend unreachable at ${ORACLE_URL}. ` +
+                'Start it with: cd backend && npm start'
+            )
+        }
+        const oraclePk = libauth.hexToBin(oraclePubkeyHex)
 
 
         // ── 3. Generate Uniq Milestone ID ─────────────────────────────────────
@@ -212,9 +250,9 @@ export default function ProjectsPage() {
             deploymentParams = {
                 contractAddress: deployment.address,
                 milestoneIdHex:  deployment.milestoneIdHex,
-                creatorPubkey:   walletPkHex,    // compressed 33-byte hex
-                funderPubkey:    walletPkHex,    // compressed 33-byte hex
-                oraclePubkey:    PLATFORM_ORACLE_PK_HEX,
+                creatorPubkey:   walletPkHex,      // compressed 33-byte hex
+                funderPubkey:    walletPkHex,      // compressed 33-byte hex
+                oraclePubkey:    oraclePubkeyHex,  // live pubkey from oracle /health — MUST match ORACLE_WIF
                 deadline,
             };
             console.log('[ProjectsPage] ✓ Contract Deployed:', contractAddress);

@@ -262,18 +262,18 @@ app.post('/api/oracle/sign', async (req, res) => {
         const tallyProof  = new Uint8Array([...milIdBytes, 0x01])  // 33 bytes total
         const proofHex    = idHex + '01'                      // hex for the response body
 
-        // ── Sign SHA256d(tallyProof) — BCH OP_CHECKDATASIG double-hashes ──────
-        // BCH's checkDataSig opcode verifies:
-        //   Schnorr.verify(oracleSig, SHA256(SHA256(tallyProof)), tallyOraclePk)
+        // ── Sign SHA256(tallyProof) — BCH OP_CHECKDATASIG single-hashes ──────
+        // CashScript's checkDataSig opcode verifies:
+        //   Schnorr.verify(oracleSig, SHA256(tallyProof), tallyOraclePk)
         //
-        // Single SHA256 (old code) caused the on-chain verification to fail.
-        // We must sign SHA256d = SHA256(SHA256(tallyProof)) here.
+        // The oracle must sign exactly SHA256(tallyProof) — a single hash,
+        // NOT double SHA256. The opcode itself applies the single SHA256 to
+        // the raw message before verification.
         const sha256Inst  = await libauth.instantiateSha256()
-        const firstHash   = sha256Inst.hash(tallyProof)       // SHA256(tallyProof)
-        const messageHash = sha256Inst.hash(firstHash)        // SHA256(SHA256(tallyProof)) = SHA256d
+        const messageHash = sha256Inst.hash(tallyProof)       // single SHA256 only
 
         console.log('[Oracle] tallyProof length  :', tallyProof.length, 'bytes (expected 33)')
-        console.log('[Oracle] messageHash (SHA256d):', libauth.binToHex(messageHash).slice(0, 20) + '…')
+        console.log('[Oracle] messageHash (SHA256):', libauth.binToHex(messageHash).slice(0, 20) + '…')
 
         // ── Sign with oracle private key (Schnorr — required for datasig) ──────
         const secp      = await libauth.instantiateSecp256k1()
