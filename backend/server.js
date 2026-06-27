@@ -294,7 +294,6 @@ app.post('/api/oracle/sign', async (req, res) => {
         const tallyProof  = new Uint8Array([...milIdBytes, 0x01])  // 33 bytes total
         const proofHex    = idHex + '01'                      // hex for the response body
 
-<<<<<<< HEAD
         // ── Sign SHA256(tallyProof) — BCH OP_CHECKDATASIG applies ONE SHA256 internally ──
         // BCH's OP_CHECKDATASIG opcode works as follows:
         //   1. It hashes the message: hash = SHA256(message)
@@ -305,17 +304,6 @@ app.post('/api/oracle/sign', async (req, res) => {
         // oracle must pre-hash once and sign that hash — NOT double-hash before signing.
         const sha256Inst  = await libauth.instantiateSha256()
         const messageHash = sha256Inst.hash(tallyProof)       // SHA256(tallyProof) — sign this
-=======
-        // ── Sign SHA256(tallyProof) — BCH OP_CHECKDATASIG single-hashes ──────
-        // CashScript's checkDataSig opcode verifies:
-        //   Schnorr.verify(oracleSig, SHA256(tallyProof), tallyOraclePk)
-        //
-        // The oracle must sign exactly SHA256(tallyProof) — a single hash,
-        // NOT double SHA256. The opcode itself applies the single SHA256 to
-        // the raw message before verification.
-        const sha256Inst  = await libauth.instantiateSha256()
-        const messageHash = sha256Inst.hash(tallyProof)       // single SHA256 only
->>>>>>> 4c1abc2ea7250f3283d4c32d1aaf4ba3d6b4cd3c
 
         console.log('[Oracle] tallyProof length  :', tallyProof.length, 'bytes (expected 33)')
         console.log('[Oracle] messageHash (SHA256):', libauth.binToHex(messageHash).slice(0, 20) + '…')
