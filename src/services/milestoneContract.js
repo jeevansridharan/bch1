@@ -513,10 +513,6 @@ export async function releaseMilestoneFunds(
         }
         const creatorSigTemplate = new SignatureTemplate(wallet.privateKeyWif)
 
-<<<<<<< HEAD
-        console.log(`[milestoneContract] ▶ Broadcasting release() to Chipnet…`)
-        console.log(`[milestoneContract]   Recipient     : ${wallet.cashaddr}`)
-=======
 
         // ── Derive recipient address from creatorPk (must match contract) ────
         // MilestoneEscrow.cash enforces:
@@ -546,7 +542,6 @@ export async function releaseMilestoneFunds(
             console.warn(`[milestoneContract]   Creator P2PKH : ${creatorP2PKH}`)
             console.warn(`[milestoneContract]   Wallet addr   : ${wallet.cashaddr}`)
         }
->>>>>>> 4c1abc2ea7250f3283d4c32d1aaf4ba3d6b4cd3c
 
         // ── cashscript v0.12.1 Transaction API ───────────────────────────────
         // 1. Get contract UTXOs  →  contract.getUtxos()
@@ -561,23 +556,6 @@ export async function releaseMilestoneFunds(
                 `The contract may not be funded, or the address was reconstructed incorrectly.`
             )
         }
-<<<<<<< HEAD
-        // Sum actual on-chain satoshis locked in the contract
-        const totalUtxoSats = utxos.reduce((s, u) => s + BigInt(u.satoshis), 0n)
-        console.log(`[milestoneContract]   Contract UTXOs: ${utxos.length} (total: ${totalUtxoSats} sat)`)
-
-        // The contract requires:
-        //   tx.outputs[0].value >= tx.inputs[this.activeInputIndex].value - 1000
-        // So we must send (totalUtxoSats - MINER_FEE_SAT) to the creator.
-        // 1200 sat covers the mempool minimum fee (1000 sat was rejected: code 66).
-        const MINER_FEE_SAT = 1200n
-        if (totalUtxoSats <= MINER_FEE_SAT) {
-            throw new Error(
-                `Contract balance (${totalUtxoSats} sat) is too low to cover the miner fee (${MINER_FEE_SAT} sat).`
-            )
-        }
-        const releaseAmount = totalUtxoSats - MINER_FEE_SAT
-=======
 
         // Sum ALL contract UTXOs to get the true on-chain balance
         const totalContractSat = utxos.reduce((s, u) => s + u.satoshis, 0n)
@@ -597,7 +575,6 @@ export async function releaseMilestoneFunds(
 
         console.log(`[milestoneContract] ▶ Broadcasting release() to Chipnet…`)
         console.log(`[milestoneContract]   Release amount (after ${MINER_FEE} sat fee): ${releaseAmount} sat`)
->>>>>>> 4c1abc2ea7250f3283d4c32d1aaf4ba3d6b4cd3c
 
         const releaseUnlocker = contract.unlock.release(creatorSigTemplate, oracleSigBytes, tallyProof)
 
