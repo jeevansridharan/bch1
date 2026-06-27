@@ -198,6 +198,7 @@ export async function releaseMilestoneFunds(
             const meta = await loadContractMetadata(projectId)
             if (meta?.milestone_id_hex) {
                 milIdHex = meta.milestone_id_hex
+                console.log('[milestoneContract] milestone_id_hex from DB:', meta.milestone_id_hex)
                 console.log('[milestoneContract] ✓ Pre-loaded milIdHex from DB for oracle call:', milIdHex.slice(0, 20) + '…')
             }
         } catch (preloadErr) {
@@ -259,6 +260,37 @@ export async function releaseMilestoneFunds(
 
     const { signature: signatureHex, oraclePubkey: oraclePubkeyHex, proofHex } = oracleResponse
     console.log('[milestoneContract] ✓ Oracle approved!')
+    console.log('[milestoneContract]   Oracle signing pubkey:', oraclePubkeyHex)
+
+    // ── PRE-FLIGHT: Verify oracle signing key matches what's in the contract ───
+    // The contract bakes tallyOraclePk into its bytecode at deploy time.
+    // checkDataSig() will ALWAYS fail if the key that signed the proof (from the
+    // oracle backend) differs from the key stored in the contracts table.
+    // Catch this here and fail fast with a clear explanation.
+    try {
+        const { loadContractMetadata } = await import('../lib/db/contracts')
+        const preflightMeta = await loadContractMetadata(projectId)
+        if (preflightMeta?.oracle_pubkey) {
+            const storedOraclePk = preflightMeta.oracle_pubkey.toLowerCase()
+            const signingOraclePk = oraclePubkeyHex.toLowerCase()
+            console.log('[milestoneContract]   Stored contract oraclePk:', storedOraclePk)
+            if (storedOraclePk !== signingOraclePk) {
+                throw new Error(
+                    `Oracle pubkey mismatch — checkDataSig() will fail on-chain!\n` +
+                    `  Contract deployed with : ${storedOraclePk}\n` +
+                    `  Backend is signing with: ${signingOraclePk}\n` +
+                    `  Fix: redeploy the contract so it uses the current oracle pubkey, ` +
+                    `  or update backend/.env ORACLE_WIF to match the key the contract was deployed with.`
+                )
+            }
+            console.log('[milestoneContract] ✓ Oracle pubkey match confirmed — checkDataSig() should pass')
+        }
+    } catch (preflightErr) {
+        // Re-throw the mismatch error — it's fatal
+        if (preflightErr.message.includes('Oracle pubkey mismatch')) throw preflightErr
+        // Other errors (DB unavailable etc.) are non-fatal — log and continue
+        console.warn('[milestoneContract] ⚠ Could not preflight oracle pubkey check:', preflightErr.message)
+    }
 
     // ── STEP 3a: If no on-chain contract data was passed as props, try loading
     // it from the Supabase contracts table (stored when the project was created).
@@ -453,7 +485,7 @@ export async function releaseMilestoneFunds(
         const tallyProof = new Uint8Array([...contractMilIdBytes, 0x01])
         const tallyProofHex = contractMilIdHex + '01'
 
-        console.log('[milestoneContract] tallyProof (hex):', tallyProofHex.slice(0, 20) + '…')
+        console.log('[milestoneContract] tallyProof built from DB value:', binToHex(tallyProof))
         console.log('[milestoneContract] tallyProof length:', tallyProof.length, 'bytes (expected 33)')
 
         // ── Verify the oracle signature is valid over our tallyProof ──────────
@@ -481,8 +513,40 @@ export async function releaseMilestoneFunds(
         }
         const creatorSigTemplate = new SignatureTemplate(wallet.privateKeyWif)
 
+<<<<<<< HEAD
         console.log(`[milestoneContract] ▶ Broadcasting release() to Chipnet…`)
         console.log(`[milestoneContract]   Recipient     : ${wallet.cashaddr}`)
+=======
+
+        // ── Derive recipient address from creatorPk (must match contract) ────
+        // MilestoneEscrow.cash enforces:
+        //   tx.outputs[0].lockingBytecode == new LockingBytecodeP2PKH(hash160(creatorPk))
+        //
+        // So we must send to the P2PKH address derived from the EXACT creatorPk
+        // used in the contract constructor — NOT wallet.cashaddr (which may differ).
+        const libauth = await import('@bitauth/libauth')
+        const sha256Engine = await libauth.instantiateSha256()
+        const ripemd160Engine = await libauth.instantiateRipemd160()
+        const creatorPkHash = ripemd160Engine.hash(sha256Engine.hash(creatorPk))  // HASH160 = RIPEMD160(SHA256(pubkey))
+
+        // Encode as P2PKH cashaddr on chipnet (type 0 = P2PKH)
+        const creatorAddrResult = libauth.encodeCashAddress({
+            prefix: 'bchtest',
+            type: 0,
+            payload: creatorPkHash,
+        })
+        // encodeCashAddress may return a string directly or an object with .address
+        const creatorP2PKH = typeof creatorAddrResult === 'string'
+            ? creatorAddrResult
+            : creatorAddrResult.address
+
+        console.log(`[milestoneContract]   Recipient (creatorPk P2PKH): ${creatorP2PKH}`)
+        if (creatorP2PKH !== wallet.cashaddr) {
+            console.warn(`[milestoneContract] ⚠ Creator P2PKH differs from wallet.cashaddr!`)
+            console.warn(`[milestoneContract]   Creator P2PKH : ${creatorP2PKH}`)
+            console.warn(`[milestoneContract]   Wallet addr   : ${wallet.cashaddr}`)
+        }
+>>>>>>> 4c1abc2ea7250f3283d4c32d1aaf4ba3d6b4cd3c
 
         // ── cashscript v0.12.1 Transaction API ───────────────────────────────
         // 1. Get contract UTXOs  →  contract.getUtxos()
@@ -497,6 +561,7 @@ export async function releaseMilestoneFunds(
                 `The contract may not be funded, or the address was reconstructed incorrectly.`
             )
         }
+<<<<<<< HEAD
         // Sum actual on-chain satoshis locked in the contract
         const totalUtxoSats = utxos.reduce((s, u) => s + BigInt(u.satoshis), 0n)
         console.log(`[milestoneContract]   Contract UTXOs: ${utxos.length} (total: ${totalUtxoSats} sat)`)
@@ -512,12 +577,33 @@ export async function releaseMilestoneFunds(
             )
         }
         const releaseAmount = totalUtxoSats - MINER_FEE_SAT
+=======
+
+        // Sum ALL contract UTXOs to get the true on-chain balance
+        const totalContractSat = utxos.reduce((s, u) => s + u.satoshis, 0n)
+        console.log(`[milestoneContract]   Contract UTXOs: ${utxos.length} (total: ${totalContractSat} sat)`)
+
+        // Deduct a realistic miner fee (3000 sat covers P2PKH output + unlocking script overhead)
+        // Using the real UTXO total avoids the "output > input" error that occurs when
+        // amountBch doesn't match the actual on-chain balance.
+        const MINER_FEE = 3000n
+        if (totalContractSat <= MINER_FEE) {
+            throw new Error(
+                `Contract balance (${totalContractSat} sat) is too low to cover the miner fee (${MINER_FEE} sat). ` +
+                `Fund the contract with more BCH before releasing.`
+            )
+        }
+        const releaseAmount = totalContractSat - MINER_FEE
+
+        console.log(`[milestoneContract] ▶ Broadcasting release() to Chipnet…`)
+        console.log(`[milestoneContract]   Release amount (after ${MINER_FEE} sat fee): ${releaseAmount} sat`)
+>>>>>>> 4c1abc2ea7250f3283d4c32d1aaf4ba3d6b4cd3c
 
         const releaseUnlocker = contract.unlock.release(creatorSigTemplate, oracleSigBytes, tallyProof)
 
         const tx = await new TransactionBuilder({ provider })
             .addInputs(utxos, releaseUnlocker)
-            .addOutput({ to: wallet.cashaddr, amount: releaseAmount })
+            .addOutput({ to: creatorP2PKH, amount: releaseAmount })
             .send()
 
         console.log(`[milestoneContract] ✓ Funds Released! TX ID: ${tx.txid}`)
