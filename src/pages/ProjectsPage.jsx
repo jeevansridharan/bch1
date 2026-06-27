@@ -57,9 +57,12 @@ const PLACEHOLDER_WALLET = 'bchtest:qp0000000000000000000000000000000000000000'
 
 /** 
  * Platform Oracle Public Key (Tally Engine) 
- * In production, this would be a fixed key held by the platform backend.
+ * NOTE: This constant is now a FALLBACK only.
+ * The real oracle pubkey is fetched live from the backend at deploy time
+ * via deployMilestoneEscrow() → GET /api/oracle/pubkey.
+ * Keeping this here only so legacy code that references it doesn't break.
  */
-const PLATFORM_ORACLE_PK_HEX = '02989c0b76cb563971fdc9bef31ec06c3560f3249d6ee9e5d83c57625596e05f6f'; // Real Platform Oracle Mock PubKey
+const PLATFORM_ORACLE_PK_HEX = '0297901125f188dd92c9c041d2da8b5972523a7d666434a0975c6241c96057d82e'; // updated to match current backend
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -201,20 +204,47 @@ export default function ProjectsPage() {
             const deployment = await deployMilestoneEscrow({
                 creatorPk,
                 funderPk,
-                oraclePk,
+                oraclePk,           // fallback if backend unreachable
                 milestoneId,
                 deadlineHeight: deadline
             });
             contractAddress = deployment.address;
             milestoneIdHexFinal = deployment.milestoneIdHex;
+
+            // STEP 4: Verify the oracle pubkey that was baked in matches the live backend.
+            // deployMilestoneEscrow fetches it from /api/oracle/pubkey, but we double-check here.
+            const deployedOraclePk = deployment.oraclePubkeyHex
+            if (deployedOraclePk) {
+                try {
+                    const pkResp = await fetch(
+                        (import.meta.env.VITE_ORACLE_URL || 'http://localhost:3001') + '/api/oracle/pubkey'
+                    )
+                    if (pkResp.ok) {
+                        const { oraclePubkey: livePk } = await pkResp.json()
+                        if (livePk && livePk.toLowerCase() !== deployedOraclePk.toLowerCase()) {
+                            console.warn(
+                                '[ProjectsPage] ⚠ ORACLE PUBKEY MISMATCH after deploy!\n' +
+                                `  Baked into contract : ${deployedOraclePk}\n` +
+                                `  Backend reports now : ${livePk}\n` +
+                                '  Release will fail. Run scripts/fix-oracle-pubkey.mjs or recreate project.'
+                            )
+                        } else {
+                            console.log('[ProjectsPage] ✓ Oracle pubkey verified — contract matches live backend.')
+                        }
+                    }
+                } catch (verifyErr) {
+                    console.warn('[ProjectsPage] Could not verify oracle pubkey post-deploy:', verifyErr.message)
+                }
+            }
+
             // Stash params so we can persist them to the contracts table once
             // Supabase gives us the project UUID.
             deploymentParams = {
                 contractAddress: deployment.address,
                 milestoneIdHex:  deployment.milestoneIdHex,
-                creatorPubkey:   walletPkHex,    // compressed 33-byte hex
-                funderPubkey:    walletPkHex,    // compressed 33-byte hex
-                oraclePubkey:    PLATFORM_ORACLE_PK_HEX,
+                creatorPubkey:   walletPkHex,
+                funderPubkey:    walletPkHex,
+                oraclePubkey:    deployedOraclePk ?? PLATFORM_ORACLE_PK_HEX,
                 deadline,
             };
             console.log('[ProjectsPage] ✓ Contract Deployed:', contractAddress);
