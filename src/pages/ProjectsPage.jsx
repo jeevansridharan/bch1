@@ -288,15 +288,9 @@ export default function ProjectsPage() {
             deploymentParams = {
                 contractAddress: deployment.address,
                 milestoneIdHex:  deployment.milestoneIdHex,
-<<<<<<< HEAD
-                creatorPubkey:   walletPkHex,
-                funderPubkey:    walletPkHex,
-                oraclePubkey:    deployedOraclePk ?? PLATFORM_ORACLE_PK_HEX,
-=======
                 creatorPubkey:   walletPkHex,      // compressed 33-byte hex
                 funderPubkey:    walletPkHex,      // compressed 33-byte hex
                 oraclePubkey:    oraclePubkeyHex,  // live pubkey from oracle /health — MUST match ORACLE_WIF
->>>>>>> 4c1abc2ea7250f3283d4c32d1aaf4ba3d6b4cd3c
                 deadline,
             };
             console.log('[ProjectsPage] ✓ Contract Deployed:', contractAddress);
