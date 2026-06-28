@@ -558,23 +558,22 @@ export async function releaseMilestoneFunds(
         }
 
         // Sum ALL contract UTXOs to get the true on-chain balance
-        const totalContractSat = utxos.reduce((s, u) => s + u.satoshis, 0n)
-        console.log(`[milestoneContract]   Contract UTXOs: ${utxos.length} (total: ${totalContractSat} sat)`)
+        const totalUtxoSats = utxos.reduce((sum, u) => sum + BigInt(u.satoshis), 0n)
+        console.log(`[milestoneContract]   Contract UTXOs: ${utxos.length} (total: ${totalUtxoSats} sat)`)
 
-        // Deduct a realistic miner fee (3000 sat covers P2PKH output + unlocking script overhead)
+        // Deduct a realistic miner fee (1200 sat covers P2PKH output + unlocking script overhead)
         // Using the real UTXO total avoids the "output > input" error that occurs when
         // amountBch doesn't match the actual on-chain balance.
-        const MINER_FEE = 3000n
-        if (totalContractSat <= MINER_FEE) {
+        if (totalUtxoSats < 1200n) {
             throw new Error(
-                `Contract balance (${totalContractSat} sat) is too low to cover the miner fee (${MINER_FEE} sat). ` +
+                `Contract balance (${totalUtxoSats} sat) is too low to cover the miner fee (1200 sat). ` +
                 `Fund the contract with more BCH before releasing.`
             )
         }
-        const releaseAmount = totalContractSat - MINER_FEE
+        const releaseAmount = totalUtxoSats - 1200n
 
         console.log(`[milestoneContract] ▶ Broadcasting release() to Chipnet…`)
-        console.log(`[milestoneContract]   Release amount (after ${MINER_FEE} sat fee): ${releaseAmount} sat`)
+        console.log(`[milestoneContract]   Release amount (after 1200 sat fee): ${releaseAmount} sat`)
 
         const releaseUnlocker = contract.unlock.release(creatorSigTemplate, oracleSigBytes, tallyProof)
 
