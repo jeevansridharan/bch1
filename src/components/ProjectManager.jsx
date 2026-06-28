@@ -8,7 +8,6 @@
  * 3. Handles loading, error, and empty states
  *
  * ── How to use ────────────────────────────────────────────────────────────────
-/**
  * Drop <ProjectManager walletAddress="0x..." /> into any page.
  * The walletAddress prop is set as the owner_wallet of each new project.
  *

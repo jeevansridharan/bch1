@@ -55,6 +55,16 @@ import * as libauth from '@bitauth/libauth'
 // For now we use a placeholder so the owner_wallet field is never empty.
 const PLACEHOLDER_WALLET = 'bchtest:qp0000000000000000000000000000000000000000'
 
+// <<<<<<< HEAD
+/** 
+ * Platform Oracle Public Key (Tally Engine) 
+ * NOTE: This constant is now a FALLBACK only.
+ * The real oracle pubkey is fetched live from the backend at deploy time
+ * via deployMilestoneEscrow() → GET /api/oracle/pubkey.
+ * Keeping this here only so legacy code that references it doesn't break.
+ */
+const PLATFORM_ORACLE_PK_HEX = '0297901125f188dd92c9c041d2da8b5972523a7d666434a0975c6241c96057d82e'; // updated to match current backend
+// =======
 // ── Oracle Backend URL ────────────────────────────────────────────────────────
 // Must match the URL used by milestoneContract.js so both sides talk to the
 // same oracle instance.
@@ -82,6 +92,7 @@ async function fetchOraclePubkey() {
     console.log('[ProjectsPage] ✓ Oracle pubkey fetched from backend:', oracle)
     return oracle
 }
+// >>>>>>> 4c1abc2ea7250f3283d4c32d1aaf4ba3d6b4cd3c
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -203,8 +214,8 @@ export default function ProjectsPage() {
         }
 
         const walletPkHex = compressPubkeyHex(wallet?.publicKey)
-        const creatorPk   = libauth.hexToBin(walletPkHex)
-        const funderPk    = creatorPk  // Creator is default funder
+        const creatorPk = libauth.hexToBin(walletPkHex)
+        const funderPk = creatorPk  // Creator is default funder
 
         // ── Fetch the LIVE oracle pubkey from the running backend ─────────────
         // CRITICAL: the contract bakes tallyOraclePk into its bytecode. The
@@ -239,20 +250,47 @@ export default function ProjectsPage() {
             const deployment = await deployMilestoneEscrow({
                 creatorPk,
                 funderPk,
-                oraclePk,
+                oraclePk,           // fallback if backend unreachable
                 milestoneId,
                 deadlineHeight: deadline
             });
             contractAddress = deployment.address;
             milestoneIdHexFinal = deployment.milestoneIdHex;
+
+            // STEP 4: Verify the oracle pubkey that was baked in matches the live backend.
+            // deployMilestoneEscrow fetches it from /api/oracle/pubkey, but we double-check here.
+            const deployedOraclePk = deployment.oraclePubkeyHex
+            if (deployedOraclePk) {
+                try {
+                    const pkResp = await fetch(
+                        (import.meta.env.VITE_ORACLE_URL || 'http://localhost:3001') + '/api/oracle/pubkey'
+                    )
+                    if (pkResp.ok) {
+                        const { oraclePubkey: livePk } = await pkResp.json()
+                        if (livePk && livePk.toLowerCase() !== deployedOraclePk.toLowerCase()) {
+                            console.warn(
+                                '[ProjectsPage] ⚠ ORACLE PUBKEY MISMATCH after deploy!\n' +
+                                `  Baked into contract : ${deployedOraclePk}\n` +
+                                `  Backend reports now : ${livePk}\n` +
+                                '  Release will fail. Run scripts/fix-oracle-pubkey.mjs or recreate project.'
+                            )
+                        } else {
+                            console.log('[ProjectsPage] ✓ Oracle pubkey verified — contract matches live backend.')
+                        }
+                    }
+                } catch (verifyErr) {
+                    console.warn('[ProjectsPage] Could not verify oracle pubkey post-deploy:', verifyErr.message)
+                }
+            }
+
             // Stash params so we can persist them to the contracts table once
             // Supabase gives us the project UUID.
             deploymentParams = {
                 contractAddress: deployment.address,
-                milestoneIdHex:  deployment.milestoneIdHex,
-                creatorPubkey:   walletPkHex,      // compressed 33-byte hex
-                funderPubkey:    walletPkHex,      // compressed 33-byte hex
-                oraclePubkey:    oraclePubkeyHex,  // live pubkey from oracle /health — MUST match ORACLE_WIF
+                milestoneIdHex: deployment.milestoneIdHex,
+                creatorPubkey: walletPkHex,      // compressed 33-byte hex
+                funderPubkey: walletPkHex,      // compressed 33-byte hex
+                oraclePubkey: oraclePubkeyHex,  // live pubkey from oracle /health — MUST match ORACLE_WIF
                 deadline,
             };
             console.log('[ProjectsPage] ✓ Contract Deployed:', contractAddress);
@@ -300,13 +338,13 @@ export default function ProjectsPage() {
         if (deploymentParams && newProject?.id) {
             try {
                 await saveContractMetadata({
-                    projectId:       newProject.id,
+                    projectId: newProject.id,
                     contractAddress: deploymentParams.contractAddress,
-                    creatorPubkey:   deploymentParams.creatorPubkey,
-                    funderPubkey:    deploymentParams.funderPubkey,
-                    oraclePubkey:    deploymentParams.oraclePubkey,
-                    milestoneIdHex:  deploymentParams.milestoneIdHex,
-                    deadline:        deploymentParams.deadline,
+                    creatorPubkey: deploymentParams.creatorPubkey,
+                    funderPubkey: deploymentParams.funderPubkey,
+                    oraclePubkey: deploymentParams.oraclePubkey,
+                    milestoneIdHex: deploymentParams.milestoneIdHex,
+                    deadline: deploymentParams.deadline,
                 })
                 console.log('[ProjectsPage] ✓ Contract metadata saved to Supabase contracts table')
             } catch (contractSaveErr) {
