@@ -26,4 +26,12 @@ export default defineConfig({
     // Let Vite pre-bundle mainnet-js properly
     include: ['mainnet-js'],
   },
+  server: {
+    // HMR configuration for WebSocket connections
+    hmr: {
+      host: 'localhost',
+      port: 5173,
+      protocol: 'ws',
+    },
+  },
 })
