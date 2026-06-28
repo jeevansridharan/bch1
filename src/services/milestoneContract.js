@@ -218,6 +218,17 @@ export async function releaseMilestoneFunds(
                 milestoneId,       // Supabase UUID (for vote tally lookup)
                 projectId,
                 milestoneIdHex: milIdHex ?? undefined,  // 64-char SHA-256 hex (for proof construction)
+                // STEP 3: Send the pubkey stored in the contracts table so the backend
+                // can catch a key mismatch early (before the on-chain checkDataSig fails).
+                expectedOraclePubkey: contractAddress
+                    ? await (async () => {
+                        try {
+                            const { loadContractMetadata } = await import('../lib/db/contracts')
+                            const m = await loadContractMetadata(projectId)
+                            return m?.oracle_pubkey ?? undefined
+                        } catch { return undefined }
+                    })()
+                    : undefined,
             }),
         })
 

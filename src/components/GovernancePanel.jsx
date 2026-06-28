@@ -112,7 +112,16 @@ export default function GovernancePanel({
         try {
             const parsed = parseFloat(mintAmt)
             if (!parsed || parsed <= 0) throw new Error('Enter a valid BCH amount')
-            const result = await fundMilestoneContract(wallet, parsed, PROJECT_ADDRESS)
+            // ✅ FIX: Send BCH to the CashScript contract address (not the static PROJECT_ADDRESS).
+            // contractAddress comes from the DB contracts table (set at project deploy time).
+            // Fallback to PROJECT_ADDRESS only for legacy projects with no on-chain contract.
+            const destination = contractAddress || PROJECT_ADDRESS
+            if (!contractAddress) {
+                console.warn('[GovernancePanel] ⚠ contractAddress not set — falling back to PROJECT_ADDRESS. Funds will NOT be releasable via the contract.')
+            } else {
+                console.log('[GovernancePanel] ✓ Locking BCH into contract:', contractAddress)
+            }
+            const result = await fundMilestoneContract(wallet, parsed, destination)
             setMintResult(result)
             if (onTransaction) {
                 onTransaction(parsed, result.simulatedTxId, 'funding')

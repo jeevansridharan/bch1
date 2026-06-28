@@ -31,8 +31,15 @@
  */
 
 import { Contract, ElectrumNetworkProvider } from 'cashscript';
-import { binToHex, secp256k1 }               from '@bitauth/libauth';
+import { binToHex, hexToBin, secp256k1 }      from '@bitauth/libauth';
 import artifact                               from '../contracts/MilestoneEscrow.json' assert { type: 'json' };
+
+// ── Oracle backend URL (same VITE_ var the frontend uses) ─────────────────────
+// In a browser context import.meta.env is available; in Node scripts it is not.
+// We fall back to localhost:3001 so the script works from both environments.
+const ORACLE_BASE_URL =
+    (typeof import.meta !== 'undefined' && import.meta.env?.VITE_ORACLE_URL) ||
+    'http://localhost:3001';
 
 // ── Chipnet block explorer base URL (for human-readable logs) ─────────────────
 const CHIPNET_EXPLORER = 'https://chipnet.imaginary.cash/address';
@@ -157,15 +164,44 @@ export async function deployMilestoneEscrow(params) {
     const {
         creatorPk,
         funderPk,
-        oraclePk,
+        oraclePk,          // used as fallback if backend unreachable
         milestoneId,
         deadlineHeight,
     } = params;
 
-    // ── Step 1: Normalise inputs to Uint8Array ────────────────────────────────
+    // ── STEP 2: Fetch live oracle pubkey from the backend ─────────────────────
+    // This ensures the contract is always baked with the key the backend is
+    // currently signing with, eliminating the pubkey-mismatch root cause.
+    let fetchedOraclePubkeyHex = null
+    try {
+        const resp = await fetch(`${ORACLE_BASE_URL}/api/oracle/pubkey`)
+        if (resp.ok) {
+            const json = await resp.json()
+            fetchedOraclePubkeyHex = json.oraclePubkey
+            console.log('[deployContract] ✓ Oracle pubkey fetched from backend:', fetchedOraclePubkeyHex)
+        } else {
+            console.warn('[deployContract] ⚠ /api/oracle/pubkey returned', resp.status, '- using passed oraclePk')
+        }
+    } catch (fetchErr) {
+        console.warn('[deployContract] ⚠ Could not reach Oracle backend:', fetchErr.message, '- using passed oraclePk')
+    }
+
+    // Resolve final oracle pubkey bytes:
+    //   1st choice: freshly fetched hex from backend
+    //   2nd choice: caller-supplied oraclePk (Uint8Array or hex)
+    let resolvedOraclePk
+    if (fetchedOraclePubkeyHex) {
+        resolvedOraclePk = hexToBin(fetchedOraclePubkeyHex)
+    } else if (oraclePk) {
+        resolvedOraclePk = ensureUint8Array(oraclePk, 'oraclePk (fallback)')
+    } else {
+        throw new Error('[deployContract] oraclePk is required (backend unreachable and no fallback provided)')
+    }
+
+    // ── Step 1: Normalise inputs to Uint8Array ─────────────────────────────────
     const creatorPkBytes   = ensureUint8Array(creatorPk,   'creatorPk');
     const funderPkBytes    = ensureUint8Array(funderPk,    'funderPk');
-    const oraclePkBytes    = ensureUint8Array(oraclePk,    'oraclePk');
+    const oraclePkBytes    = resolvedOraclePk;  // already Uint8Array from above
     const milestoneIdBytes = ensureUint8Array(milestoneId, 'milestoneId');
 
     // ── Step 2: Compress pubkeys if uncompressed (65 bytes) ────────────────────
@@ -246,11 +282,12 @@ export async function deployMilestoneEscrow(params) {
     console.log('  deadline    :', deadlineBigInt.toString(), 'blocks');
     console.groupEnd();
 
-    // ── Step 7: Return everything the caller needs ────────────────────────────
+    // ── Step 7: Return everything the caller needs ────────────────────────────────
     return {
         address,           // real Chipnet P2SH32 cashaddr — store in DB as contract_address
         tokenAddress,      // CashToken-aware variant
         contract,          // live Contract instance — use for .getBalance(), .getUtxos()
         milestoneIdHex,    // hex string of milestoneId — store in DB / description
+        oraclePubkeyHex:   binToHex(oraclePkCompressed),  // the pubkey baked into this contract
     };
 }

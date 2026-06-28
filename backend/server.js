@@ -121,6 +121,14 @@ app.get('/health', (_req, res) => {
     })
 })
 
+// ── STEP 1: Oracle pubkey endpoint ───────────────────────────────────────────
+// Frontend calls this at deploy time to get the current signing pubkey,
+// and stores it in the contracts table alongside the contract address.
+// This guarantees the baked-in tallyOraclePk always matches the live signer.
+app.get('/api/oracle/pubkey', (_req, res) => {
+    res.json({ oraclePubkey: oraclePubkeyHex })
+})
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. POST /api/oracle/sign  — the core route
 // ─────────────────────────────────────────────────────────────────────────────
@@ -155,6 +163,30 @@ app.post('/api/oracle/sign', async (req, res) => {
     if (!projectId || typeof projectId !== 'string') {
         console.warn('[Oracle] ✗ Missing projectId')
         return res.status(400).json({ error: 'projectId is required and must be a string' })
+    }
+
+    // ── STEP 3: Verify expectedOraclePubkey if caller sent one ────────────────
+    // The frontend loads oracle_pubkey from the contracts table and sends it here.
+    // If it doesn't match what we're currently signing with, the on-chain
+    // checkDataSig will fail anyway — so we catch it early and tell the user
+    // to redeploy the contract with the current oracle key.
+    const { expectedOraclePubkey } = req.body
+    if (expectedOraclePubkey && typeof expectedOraclePubkey === 'string') {
+        if (expectedOraclePubkey.toLowerCase() !== oraclePubkeyHex.toLowerCase()) {
+            console.error(
+                '[Oracle] ✗ Oracle pubkey mismatch!\n' +
+                `  Contract expects : ${expectedOraclePubkey}\n` +
+                `  Backend is using : ${oraclePubkeyHex}\n` +
+                '  → Run scripts/fix-oracle-pubkey.mjs or create a new project.'
+            )
+            return res.status(400).json({
+                approved: false,
+                reason:
+                    'Oracle pubkey mismatch — the contract was deployed with a different oracle key. ' +
+                    'Run scripts/fix-oracle-pubkey.mjs or create a new project to fix this.',
+            })
+        }
+        console.log('[Oracle] ✓ expectedOraclePubkey matches current signing key')
     }
 
     try {
@@ -262,15 +294,16 @@ app.post('/api/oracle/sign', async (req, res) => {
         const tallyProof  = new Uint8Array([...milIdBytes, 0x01])  // 33 bytes total
         const proofHex    = idHex + '01'                      // hex for the response body
 
-        // ── Sign SHA256(tallyProof) — BCH OP_CHECKDATASIG single-hashes ──────
-        // CashScript's checkDataSig opcode verifies:
-        //   Schnorr.verify(oracleSig, SHA256(tallyProof), tallyOraclePk)
+        // ── Sign SHA256(tallyProof) — BCH OP_CHECKDATASIG applies ONE SHA256 internally ──
+        // BCH's OP_CHECKDATASIG opcode works as follows:
+        //   1. It hashes the message: hash = SHA256(message)
+        //   2. It verifies: Schnorr.verify(sig, hash, pubkey)
         //
-        // The oracle must sign exactly SHA256(tallyProof) — a single hash,
-        // NOT double SHA256. The opcode itself applies the single SHA256 to
-        // the raw message before verification.
+        // This means: to produce a valid oracleSig, we must sign SHA256(tallyProof).
+        // The opcode will then re-hash it internally (effectively SHA256d), so the
+        // oracle must pre-hash once and sign that hash — NOT double-hash before signing.
         const sha256Inst  = await libauth.instantiateSha256()
-        const messageHash = sha256Inst.hash(tallyProof)       // single SHA256 only
+        const messageHash = sha256Inst.hash(tallyProof)       // SHA256(tallyProof) — sign this
 
         console.log('[Oracle] tallyProof length  :', tallyProof.length, 'bytes (expected 33)')
         console.log('[Oracle] messageHash (SHA256):', libauth.binToHex(messageHash).slice(0, 20) + '…')
