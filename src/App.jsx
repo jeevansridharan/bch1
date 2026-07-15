@@ -1,12 +1,14 @@
 /**
  * src/App.jsx — root with React Router
- * All routes defined here. Layout wraps every page via <Outlet />.
+ * LandingPage renders at / (standalone, no sidebar).
+ * All app pages share the sidebar Layout under /dashboard, /projects, etc.
  */
 
 import React from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 
 import Layout from './layouts/Layout'
+import LandingPage from './pages/LandingPage'
 import DashboardPage from './pages/DashboardPage'
 import ProjectsPage from './pages/ProjectsPage'
 import GovernancePage from './pages/GovernancePage'
@@ -20,16 +22,19 @@ export default function App() {
     <BrowserRouter>
       <WalletProvider>
         <Routes>
-          {/* All pages share the sidebar Layout */}
+          {/* Landing page — standalone, no sidebar */}
+          <Route path="/" element={<LandingPage />} />
+
+          {/* All app pages share the sidebar Layout */}
           <Route element={<Layout />}>
-            <Route index element={<DashboardPage />} />
+            <Route path="dashboard" element={<DashboardPage />} />
             <Route path="projects" element={<ProjectsPage />} />
             <Route path="governance" element={<GovernancePage />} />
             <Route path="transactions" element={<TransactionsPage />} />
             <Route path="profile" element={<ProfilePage />} />
 
             {/* Catch-all → redirect to dashboard */}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Routes>
       </WalletProvider>
