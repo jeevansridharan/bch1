@@ -1,6 +1,7 @@
 /**
  * src/App.jsx — root with React Router
  * LandingPage renders at / (standalone, no sidebar).
+ * DocsPage renders at /docs (standalone, no sidebar).
  * All app pages share the sidebar Layout under /dashboard, /projects, etc.
  */
 
@@ -14,6 +15,7 @@ import ProjectsPage from './pages/ProjectsPage'
 import GovernancePage from './pages/GovernancePage'
 import TransactionsPage from './pages/TransactionsPage'
 import ProfilePage from './pages/ProfilePage'
+import DocsPage from './pages/DocsPage'
 
 import { WalletProvider } from './contexts/WalletContext'
 
@@ -24,6 +26,7 @@ export default function App() {
         <Routes>
           {/* Landing page — standalone, no sidebar */}
           <Route path="/" element={<LandingPage />} />
+          <Route path="/docs" element={<DocsPage />} />
 
           {/* All app pages share the sidebar Layout */}
           <Route element={<Layout />}>

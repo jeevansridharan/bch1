@@ -101,11 +101,11 @@ function Navbar() {
                         { label: 'How it Works', id: 'how-it-works' },
                         { label: 'Projects', id: 'features' },
                         { label: 'Governance', id: 'features' },
-                        { label: 'Docs', id: null },
-                    ].map(({ label, id }) => (
+                        { label: 'Docs', id: null, to: '/docs' },
+                    ].map(({ label, id, to }) => (
                         <button
                             key={label}
-                            onClick={() => id ? scrollTo(id) : null}
+                            onClick={() => to ? navigate(to) : id ? scrollTo(id) : null}
                             style={{
                                 background: 'none', border: 'none', cursor: 'pointer',
                                 color: TEXT_MUTED, fontSize: '0.875rem', fontWeight: 500,
@@ -235,6 +235,7 @@ function Hero() {
                         🚀 Launch App
                     </button>
                     <button
+                        onClick={() => navigate('/docs')}
                         style={{
                             padding: '14px 32px', borderRadius: '12px', cursor: 'pointer',
                             background: 'transparent', border: `1.5px solid rgba(16,185,129,0.35)`,

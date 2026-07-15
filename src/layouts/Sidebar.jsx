@@ -14,15 +14,20 @@ import {
     ChevronLeft,
     ChevronRight,
     Zap,
+    BookOpen,
 } from 'lucide-react'
 
 // ── Nav items definition ──────────────────────────────────────────────────────
 const NAV_ITEMS = [
-    { to: '/', label: 'Dashboard', Icon: LayoutDashboard },
+    { to: '/dashboard', label: 'Dashboard', Icon: LayoutDashboard },
     { to: '/projects', label: 'Projects', Icon: FolderKanban },
     { to: '/governance', label: 'Governance', Icon: Vote },
     { to: '/transactions', label: 'Transactions', Icon: ArrowLeftRight },
     { to: '/profile', label: 'Profile', Icon: UserCircle },
+]
+
+const BOTTOM_ITEMS = [
+    { to: '/docs', label: 'Docs', Icon: BookOpen },
 ]
 
 export default function Sidebar() {
@@ -168,6 +173,50 @@ export default function Sidebar() {
                     )
                 })}
             </nav>
+
+            {/* ── Docs link (bottom) ────────────────────────────────────────── */}
+            <div style={{ padding: '0 8px', marginBottom: '4px' }}>
+                {!collapsed && (
+                    <div style={{ fontSize: '0.6rem', fontWeight: 700, color: '#2d3748', textTransform: 'uppercase', letterSpacing: '0.1em', padding: '4px 14px 6px' }}>Resources</div>
+                )}
+                {BOTTOM_ITEMS.map(({ to, label, Icon }) => {
+                    const isActive = location.pathname.startsWith(to)
+                    return (
+                        <NavLink
+                            key={to}
+                            to={to}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: '12px',
+                                padding: collapsed ? '12px 0' : '11px 14px',
+                                justifyContent: collapsed ? 'center' : 'flex-start',
+                                borderRadius: '10px', textDecoration: 'none',
+                                transition: 'all 0.2s ease',
+                                background: isActive
+                                    ? 'linear-gradient(135deg, rgba(16,185,129,0.25), rgba(5,150,105,0.15))'
+                                    : 'transparent',
+                                border: isActive
+                                    ? '1px solid rgba(16,185,129,0.3)'
+                                    : '1px solid transparent',
+                                position: 'relative',
+                            }}
+                            title={collapsed ? label : undefined}
+                        >
+                            {isActive && (
+                                <div style={{
+                                    position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)',
+                                    width: '3px', height: '60%',
+                                    background: 'linear-gradient(180deg, #10b981, #059669)',
+                                    borderRadius: '0 3px 3px 0', boxShadow: '0 0 8px rgba(16,185,129,0.6)',
+                                }} />
+                            )}
+                            <Icon size={20} color={isActive ? '#34d399' : '#475569'} strokeWidth={isActive ? 2.5 : 2} style={{ flexShrink: 0, transition: 'color 0.2s' }} />
+                            {!collapsed && (
+                                <span style={{ fontSize: '0.875rem', fontWeight: isActive ? 700 : 500, color: isActive ? '#e2e8f0' : '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', transition: 'color 0.2s', letterSpacing: '-0.01em' }}>{label}</span>
+                            )}
+                        </NavLink>
+                    )
+                })}
+            </div>
 
             {/* ── Network badge ─────────────────────────────────────────────── */}
             {!collapsed && (
