@@ -65,7 +65,7 @@ async function main() {
         fail(`Users table error: ${e.message}`)
     }
 
-    // ── 3. Test PROJECTS table ────────────────────────────────────────────────
+    // ── 3. Test PROJECTS table ─────────────────────
     head('3. Projects Table')
     try {
         const { data, error } = await supabase
